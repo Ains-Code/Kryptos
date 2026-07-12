@@ -105,7 +105,22 @@ task deploy(type: Jar){
     dependsOn jar
     archiveFileName = "${base.archivesBaseName}.jar"
 
+    duplicatesStrategy(DuplicatesStrategy.EXCLUDE)
+
     from{ [zipTree("$buildDir/libs/${project.archivesBaseName}Desktop.jar"), zipTree("$buildDir/libs/${project.archivesBaseName}Android.jar")] }
+
+    // Explicitly re-include resources directly from disk so they can never be
+    // dropped by the Desktop/Android jar merge above (e.g. d8 only preserves
+    // .class files, so if it's processed first/last it must not win ties).
+    from(rootDir){
+        include "mod.hjson"
+        include "icon.png"
+        include "sprites/**"
+        include "content/**"
+        include "bundles/**"
+        include "sounds/**"
+        include "maps/**"
+    }
 
     doLast{
         delete{
