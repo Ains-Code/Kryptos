@@ -2,6 +2,7 @@ package kryptos.ui;
 
 import arc.Core;
 import arc.func.Boolp;
+import arc.graphics.Color;
 import arc.graphics.g2d.TextureRegion;
 import arc.input.KeyCode;
 import arc.math.Interp;
@@ -12,6 +13,7 @@ import arc.scene.event.InputListener;
 import arc.scene.event.Touchable;
 import arc.scene.style.Drawable;
 import arc.scene.ui.Button;
+import arc.scene.ui.Image;
 import arc.scene.ui.ImageButton;
 import arc.scene.ui.Tooltip;
 import arc.scene.ui.layout.Table;
@@ -30,6 +32,10 @@ public class KryptosHud {
     private static final String SETTING_Y = "kryptos-hud-y";
     private static final float DEFAULT_X = 16f;
     private static final float DEFAULT_Y = 16f;
+
+    /** Matches STYLE.md: cyan energy accent for "active", dim structural steel for "inactive". */
+    private static final Color ACCENT_ON = Color.valueOf("8ff5ff");
+    private static final Color ACCENT_OFF = Color.valueOf("7b8494");
 
     public static boolean autoplay = false;
     public static boolean healthBars = false;
@@ -71,7 +77,10 @@ public class KryptosHud {
         addToggle(panel, "health", "Health Bars", () -> healthBars, b -> healthBars = b);
         addToggle(panel, "path", "Pathfinding", () -> pathfinding, b -> pathfinding = b);
         addToggle(panel, "range", "Range Display", () -> rangeDisplay, b -> rangeDisplay = b);
-        addToggle(panel, "team", "Team Resources", () -> teamResources, b -> teamResources = b);
+        addToggle(panel, "team", "Team Resources", () -> teamResources, b -> {
+            teamResources = b;
+            KryptosTeamPanel.setShown(b);
+        });
 
         ImageButton icon = new ImageButton(safeDrawable("Kcon"), Styles.emptyi);
         icon.resizeImage(ICON_SIZE);
@@ -82,9 +91,12 @@ public class KryptosHud {
         row.add(panel).padRight(8f);
         row.add(icon).size(ICON_SIZE + 12f);
 
+        Table teamPanel = KryptosTeamPanel.build();
+
         container.top();
         container.add(handle).growX().height(HANDLE_HEIGHT).row();
-        container.add(row);
+        container.add(row).row();
+        container.add(teamPanel).growX().padTop(6f);
         container.pack();
 
         attachContainerDrag();
@@ -160,12 +172,20 @@ public class KryptosHud {
     }
 
     private static void addToggle(Table into, String iconName, String tooltipText, Boolp getter, arc.func.Boolc setter) {
-        ImageButton btn = new ImageButton(safeDrawable(iconName), Styles.emptyi);
-        btn.resizeImage(BTN_SIZE * 0.5f);
-        btn.update(() -> btn.setChecked(getter.get()));
-        btn.clicked(() -> setter.get(!getter.get()));
+        Image[] iconRef = new Image[1];
+
+        Button btn = into.button(t -> {
+            iconRef[0] = t.image(safeDrawable(iconName)).size(BTN_SIZE * 0.5f).get();
+        }, Styles.emptyi, () -> setter.get(!getter.get())).size(BTN_SIZE).pad(4f).get();
+
+        btn.update(() -> {
+            boolean active = getter.get();
+            btn.setChecked(active);
+            if (iconRef[0] != null) {
+                iconRef[0].setColor(active ? ACCENT_ON : ACCENT_OFF);
+            }
+        });
         btn.addListener(new Tooltip(t -> t.background(Styles.black6).add(tooltipText).pad(4f)));
-        into.add(btn).size(BTN_SIZE).pad(4f);
     }
 
     public static void toggle() {
