@@ -21,8 +21,8 @@ import mindustry.ui.Styles;
 import static mindustry.Vars.ui;
 
 public class KryptosHud {
-    private static final float ICON_SIZE = 72f;
-    private static final float BTN_SIZE = 56f;
+    private static final float ICON_SIZE = 52f;
+    private static final float BTN_SIZE = 40f;
     private static final float HANDLE_HEIGHT = 14f;
     private static final float DRAG_THRESHOLD = 6f;
 
@@ -161,7 +161,7 @@ public class KryptosHud {
 
     private static void addToggle(Table into, String iconName, String tooltipText, Boolp getter, arc.func.Boolc setter) {
         ImageButton btn = new ImageButton(safeDrawable(iconName), Styles.emptyi);
-        btn.resizeImage(BTN_SIZE * 0.7f);
+        btn.resizeImage(BTN_SIZE * 0.5f);
         btn.update(() -> btn.setChecked(getter.get()));
         btn.clicked(() -> setter.get(!getter.get()));
         btn.addListener(new Tooltip(t -> t.background(Styles.black6).add(tooltipText).pad(4f)));
