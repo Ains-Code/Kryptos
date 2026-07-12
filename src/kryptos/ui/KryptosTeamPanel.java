@@ -5,11 +5,11 @@ import arc.scene.ui.Label;
 import arc.scene.ui.layout.Table;
 import mindustry.Vars;
 import mindustry.game.Team;
+import mindustry.gen.Building;
 import mindustry.gen.Groups;
 import mindustry.gen.Unit;
 import mindustry.type.Item;
 import mindustry.ui.Styles;
-import mindustry.world.blocks.storage.CoreBlock.CoreBuild;
 
 /**
  * "Team Resources" panel — toggled from {@link KryptosHud}. Shows the
@@ -60,7 +60,7 @@ public class KryptosTeamPanel {
         table.add(theirs).left().row();
 
         // --- Minerals: core item storage ---
-        CoreBuild core = own.core();
+        Building core = own.core();
         if (core != null) {
             Table minerals = new Table();
             boolean any = false;
