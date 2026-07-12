@@ -43,17 +43,18 @@ public class KryptosHud {
 
     /**
      * Looks up a mod sprite region and logs a clear warning if it wasn't
-     * actually packed into the atlas. If you're seeing "oh no" placeholder
-     * icons in-game, check the log for this warning - it means Kryptos.jar
-     * wasn't built/installed correctly (e.g. the raw source was imported
-     * directly from GitHub instead of the compiled release jar).
+     * actually packed into the atlas. Sprites placed under sprites/ (as
+     * opposed to sprites-override/) get their atlas region id prefixed with
+     * "<modname>-" by Mindustry's mod loader, so we need to look them up
+     * with that prefix here instead of the bare filename.
      */
     private static Drawable safeDrawable(String name) {
-        TextureRegion region = Core.atlas.find(name);
+        String fullName = "kryptos-" + name;
+        TextureRegion region = Core.atlas.find(fullName);
         if (!Core.atlas.isFound(region)) {
-            Log.warn("[Kryptos] Sprite '@' not found in atlas! Make sure you installed the built Kryptos.jar from Releases, not the raw source folder/zip.", name);
+            Log.warn("[Kryptos] Sprite '@' not found in atlas!", fullName);
         }
-        return Core.atlas.drawable(name);
+        return Core.atlas.drawable(fullName);
     }
 
     public static void build() {
