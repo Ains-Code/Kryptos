@@ -66,13 +66,13 @@ public class KryptosHud {
         panel.visible = false;
         panel.pack();
 
-        addToggle(panel, "kryptos-icon-autoplay", "Autoplay", () -> autoplay, b -> autoplay = b);
-        addToggle(panel, "kryptos-icon-health", "Health Bars", () -> healthBars, b -> healthBars = b);
-        addToggle(panel, "kryptos-icon-path", "Pathfinding", () -> pathfinding, b -> pathfinding = b);
-        addToggle(panel, "kryptos-icon-range", "Range Display", () -> rangeDisplay, b -> rangeDisplay = b);
-        addToggle(panel, "kryptos-icon-team", "Team Resources", () -> teamResources, b -> teamResources = b);
+        addToggle(panel, "autoplay", "Autoplay", () -> autoplay, b -> autoplay = b);
+        addToggle(panel, "health", "Health Bars", () -> healthBars, b -> healthBars = b);
+        addToggle(panel, "path", "Pathfinding", () -> pathfinding, b -> pathfinding = b);
+        addToggle(panel, "range", "Range Display", () -> rangeDisplay, b -> rangeDisplay = b);
+        addToggle(panel, "team", "Team Resources", () -> teamResources, b -> teamResources = b);
 
-        ImageButton icon = new ImageButton(safeDrawable("kryptos-icon"), Styles.emptyi);
+        ImageButton icon = new ImageButton(safeDrawable("Kcon"), Styles.emptyi);
         icon.resizeImage(ICON_SIZE);
         icon.clicked(KryptosHud::toggle);
         icon.addListener(new Tooltip(t -> t.background(Styles.black6).add("Kryptos HUD").pad(4f)));
