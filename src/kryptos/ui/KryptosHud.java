@@ -9,6 +9,7 @@ import arc.scene.actions.Actions;
 import arc.scene.event.InputEvent;
 import arc.scene.event.InputListener;
 import arc.scene.event.Touchable;
+import arc.scene.ui.Button;
 import arc.scene.ui.ImageButton;
 import arc.scene.ui.Tooltip;
 import arc.scene.ui.layout.Table;
@@ -67,22 +68,39 @@ public class KryptosHud {
         container.add(row);
         container.pack();
 
+        attachContainerDrag();
+
         loadPosition();
 
         ui.hudGroup.addChild(container);
     }
 
+    /** Purely visual grip strip now — actual dragging is handled by {@link #attachContainerDrag()}. */
     private static Table buildDragHandle() {
         Table handle = new Table(t -> t.background(Styles.black6));
         handle.touchable = Touchable.enabled;
+        return handle;
+    }
 
+    /**
+     * Lets the player drag the widget from anywhere on it (background, gaps,
+     * the handle strip) instead of only a thin strip. Buttons are excluded so
+     * taps on the main icon and toggle buttons keep working normally: if a
+     * touch starts on a {@link Button}, we return false immediately and let
+     * the button handle its own click, never starting a drag from it.
+     */
+    private static void attachContainerDrag() {
         final float[] dragOrigin = new float[2]; // touch-down position in stage coords
         final float[] elemOrigin = new float[2]; // container position at touch-down
         final boolean[] dragging = {false};
 
-        handle.addListener(new InputListener() {
+        container.addListener(new InputListener() {
             @Override
             public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button) {
+                if (event.targetActor instanceof Button) {
+                    return false;
+                }
+
                 dragOrigin[0] = event.stageX;
                 dragOrigin[1] = event.stageY;
                 elemOrigin[0] = container.x;
@@ -109,8 +127,6 @@ public class KryptosHud {
                 dragging[0] = false;
             }
         });
-
-        return handle;
     }
 
     private static void loadPosition() {
