@@ -6,6 +6,7 @@ import arc.scene.ui.layout.Table;
 import mindustry.Vars;
 import mindustry.game.Team;
 import mindustry.gen.Groups;
+import mindustry.gen.Unit;
 import mindustry.type.Item;
 import mindustry.ui.Styles;
 import mindustry.world.blocks.storage.CoreBlock.CoreBuild;
@@ -41,9 +42,13 @@ public class KryptosTeamPanel {
 
         Team own = Vars.player.team();
 
-        // --- Units: yours vs enemy ---
-        int ownUnits = Groups.unit.count(u -> u.team == own);
-        int enemyUnits = Groups.unit.count(u -> u.team != own && Vars.state.teams.isActive(u.team));
+        // --- Units: yours vs enemy (manual count; Groups.unit has no count(predicate)) ---
+        int ownUnits = 0;
+        int enemyUnits = 0;
+        for (Unit u : Groups.unit) {
+            if (u.team == own) ownUnits++;
+            else if (u.team.active()) enemyUnits++;
+        }
 
         table.add("Units").color(LABEL_COLOR).left().padRight(6f);
         Label mine = new Label(String.valueOf(ownUnits));
