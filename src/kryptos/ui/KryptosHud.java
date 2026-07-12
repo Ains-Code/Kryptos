@@ -23,8 +23,8 @@ import mindustry.ui.Styles;
 import static mindustry.Vars.ui;
 
 public class KryptosHud {
-    private static final float ICON_SIZE = 70f;
-    private static final float BTN_SIZE = 56f;
+    private static final float ICON_SIZE = 52f;
+    private static final float BTN_SIZE = 40f;
     private static final float DRAG_THRESHOLD = 6f;
 
     private static final String SETTING_X = "kryptos-hud-x";
@@ -41,6 +41,7 @@ public class KryptosHud {
     public static boolean pathfinding = false;
     public static boolean rangeDisplay = false;
     public static boolean teamResources = false;
+    public static boolean timeControl = false;
 
     private static Table container;
     private static Table panel;
@@ -74,6 +75,7 @@ public class KryptosHud {
         addToggle(panel, "health", "Health Bars", () -> healthBars, b -> healthBars = b);
         addToggle(panel, "path", "Pathfinding", () -> pathfinding, b -> pathfinding = b);
         addToggle(panel, "range", "Range Display", () -> rangeDisplay, b -> rangeDisplay = b);
+        addToggle(panel, "time", "Time Control", () -> timeControl, b -> timeControl = b);
         addToggle(panel, "team", "Team Resources", () -> teamResources, b -> {
             teamResources = b;
             KryptosTeamPanel.setShown(b);
@@ -163,7 +165,7 @@ public class KryptosHud {
         Image[] iconRef = new Image[1];
 
         Button btn = into.button(t -> {
-            iconRef[0] = t.image(safeDrawable(iconName)).size(BTN_SIZE * 0.8f).get();
+            iconRef[0] = t.image(safeDrawable(iconName)).size(BTN_SIZE * 0.5f).get();
         }, Styles.emptyi, () -> setter.get(!getter.get())).size(BTN_SIZE).pad(4f).get();
 
         btn.update(() -> {
