@@ -10,6 +10,7 @@ import kryptos.ui.KryptosHealthBar;
 import kryptos.ui.KryptosHud;
 import kryptos.ui.KryptosPathIndicator;
 import kryptos.ui.KryptosRangeDisplay;
+import kryptos.ui.KryptosTheme;
 import kryptos.ui.KryptosTimeControl;
 import kryptos.ui.KryptosUpdateChecker;
 import mindustry.Vars;
@@ -24,6 +25,7 @@ public class KryptosMod extends Mod {
     public KryptosMod() {
         Log.info("Kryptos mod loaded.");
         Events.on(ClientLoadEvent.class, e -> {
+            KryptosTheme.apply();
             KryptosHud.build();
             KryptosPathIndicator.init();
             KryptosHealthBar.init();
