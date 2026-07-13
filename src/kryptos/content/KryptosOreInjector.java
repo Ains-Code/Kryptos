@@ -1,10 +1,11 @@
 package kryptos.content;
 
+import arc.Core;
 import arc.Events;
 import arc.math.Rand;
 import mindustry.content.Blocks;
 import mindustry.content.Planets;
-import mindustry.game.EventType.SectorLaunchEvent;
+import mindustry.game.EventType.WorldLoadEvent;
 import mindustry.gen.Building;
 import mindustry.world.Tile;
 
@@ -16,22 +17,34 @@ import static mindustry.Vars.world;
  * Vanilla campaign generators (Serpulo/Erekir) hardcode their own ore lists,
  * so a modded ore like voidsteel never appears there even with
  * {@code oreDefault = true}. This sprinkles a sparse, spawn-safe scatter of
- * voidsteel into a sector's terrain right after it's freshly generated
- * (never on a sector that's already been visited/saved before).
+ * voidsteel into a sector's terrain automatically on load, no HUD toggle
+ * needed. A per-sector flag (saved in settings, not the map) makes sure it
+ * only runs once each -- this also retroactively covers sectors you already
+ * visited before this existed, since it just checks "have I injected this
+ * sector id yet?" rather than "is this a brand new sector?".
  */
 public class KryptosOreInjector {
+    private static final String FLAG_PREFIX = "kryptos-ore-injected-";
     private static final float CHANCE = 0.03f;
     private static final float MIN_SPAWN_DIST = 45f * tilesize;
 
     public static void init() {
-        Events.on(SectorLaunchEvent.class, e -> {
-            if (e.sector == null || e.sector.planet == null) {
+        Events.on(WorldLoadEvent.class, e -> {
+            var sector = state.rules.sector;
+            if (sector == null || sector.planet == null) {
                 return;
             }
-            if (e.sector.planet != Planets.serpulo && e.sector.planet != Planets.erekir) {
+            if (sector.planet != Planets.serpulo && sector.planet != Planets.erekir) {
                 return;
             }
-            inject(e.sector.id);
+
+            String flag = FLAG_PREFIX + sector.planet.name + "-" + sector.id;
+            if (Core.settings.getBool(flag, false)) {
+                return;
+            }
+
+            inject(sector.id);
+            Core.settings.put(flag, true);
         });
     }
 
