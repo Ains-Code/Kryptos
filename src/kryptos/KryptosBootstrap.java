@@ -1,7 +1,7 @@
 package kryptos;
 
 import arc.util.Log;
-import kryptos.content.KryptosOreInjector;
+import kryptos.world.KryptosOreGenerator;
 import kryptos.ui.KryptosHealthBar;
 import kryptos.ui.KryptosHud;
 import kryptos.ui.KryptosPathIndicator;
@@ -38,8 +38,8 @@ public final class KryptosBootstrap {
         // ===========================
         // World
         // ===========================
-
-        KryptosOreInjector.init();
+        
+        KryptosOreGenerator.init();
 
         Log.info("Kryptos systems initialized.");
     }
