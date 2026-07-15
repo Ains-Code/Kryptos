@@ -52,9 +52,17 @@ public final class KryptosSectorRules {
     private static final Map<String, Density> SECTORS = new HashMap<>();
 
     static {
-        SECTORS.put("craters", Density.COMMON);
-        SECTORS.put("frozen-forest", Density.MEDIUM);
-        SECTORS.put("ruinous-shores", Density.RARE);
+        // Verified against Mindustry v159.5 source: mindustry.content.SectorPresets
+        // field names (which are also the MappableContent.name string passed to
+        // each SectorPreset's constructor -- confirmed independently by the
+        // sector.<name>.description keys in core/assets/bundles/bundle.properties,
+        // and by this mod's own "Sector: frozenForest" runtime log).
+        // "craters" / "frozen-forest" / "ruinous-shores" were never real IDs --
+        // the in-game names ("The Craters", "Frozen Forest", "Ruinous Shores")
+        // don't match the content system's camelCase, no-hyphen identifiers.
+        SECTORS.put("crateredBattleground", Density.COMMON); // "The Craters" / "Cratered Battleground"
+        SECTORS.put("frozenForest", Density.MEDIUM);
+        SECTORS.put("ruinousShores", Density.RARE);
 
         // Future sectors (Kryptos Planet, Kryptos Campaign, etc.) get
         // added here as one line each -- see class docs.
