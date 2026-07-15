@@ -14,7 +14,10 @@ import mindustry.world.Tile;
 import mindustry.world.blocks.environment.OreBlock;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static mindustry.Vars.world;
 
@@ -219,10 +222,15 @@ public final class KryptosOreGenerator {
         Log.info("[Kryptos] Accepted seeds: @", seeds.size());
 
         int placedTotal = 0;
+        Map<String, Integer> rejectedFloorHistogram = new HashMap<>();
+        Map<String, Integer> acceptedFloorHistogram = new HashMap<>();
         for (Seed s : seeds) {
-            placedTotal += createPatch(noise, s, ore);
+            placedTotal += createPatch(noise, s, ore, rejectedFloorHistogram, acceptedFloorHistogram);
         }
         Log.info("[Kryptos] Placed tiles: @", placedTotal);
+
+        logFloorHistogram("Rejected floors:", rejectedFloorHistogram);
+        logFloorHistogram("Accepted floors:", acceptedFloorHistogram);
 
         int finalCount = countKryptosOre(ore);
         Log.info("[Kryptos] Final Kryptos Ore tiles: @", finalCount);
@@ -230,6 +238,29 @@ public final class KryptosOreGenerator {
         logOreBreakdown("AFTER generate()");
         Core.app.post(() -> logOreBreakdown("ONE FRAME LATER"));
         Timer.schedule(() -> logOreBreakdown("AFTER 5 SECONDS"), 5f);
+    }
+
+    /**
+     * Diagnostic-only: prints a floor-name -&gt; tile-count histogram, sorted
+     * highest-count first. Deliberately avoids java.util.stream (the
+     * Android jar's d8 desugaring for this project only targets --min-api
+     * 14, which doesn't reliably backport the streams API), using a plain
+     * ArrayList + Collections.sort instead.
+     */
+    private static void logFloorHistogram(String label, Map<String, Integer> histogram) {
+        List<Map.Entry<String, Integer>> entries = new ArrayList<>(histogram.entrySet());
+        Collections.sort(entries, (a, b) -> b.getValue() - a.getValue());
+
+        Log.info("[Kryptos] @", label);
+        for (Map.Entry<String, Integer> entry : entries) {
+            Log.info("[Kryptos]   @ = @", entry.getKey(), entry.getValue());
+        }
+    }
+
+    /** Diagnostic-only: increments a String-&gt;count histogram entry by one. */
+    private static void incrementHistogram(Map<String, Integer> histogram, String key) {
+        Integer current = histogram.get(key);
+        histogram.put(key, current == null ? 1 : current + 1);
     }
 
     /**
@@ -435,21 +466,15 @@ public final class KryptosOreGenerator {
      * ragged outer edge instead of leaving random holes in the middle;
      * each tile's effective inclusion radius is perturbed by fine noise
      * so the boundary is never a perfect circle, square, or straight edge.
-     */
-    /**
-     * Grows one irregular patch outward from a seed point. Candidate
-     * tiles are visited nearest-first so the hard tile cap trims the
-     * ragged outer edge instead of leaving random holes in the middle;
-     * each tile's effective inclusion radius is perturbed by fine noise
-     * so the boundary is never a perfect circle, square, or straight edge.
      *
      * Diagnostic-only: tallies why each candidate offset tile did *not*
      * end up placed (existing OreBlock, invalid floor, outside the
      * noise-perturbed effective radius) alongside the accepted count, and
-     * logs the seed's x/y/radius/placed summary. None of these counters
+     * logs the seed's x/y/radius/placed summary, plus per-floor-name
+     * histograms of rejected vs. accepted tiles. None of these counters
      * feed back into the placement decision.
      */
-    private static int createPatch(KryptosNoise noise, Seed seed, OreBlock ore) {
+    private static int createPatch(KryptosNoise noise, Seed seed, OreBlock ore, Map<String, Integer> rejectedFloorHistogram, Map<String, Integer> acceptedFloorHistogram) {
         int reach = (int) Math.ceil(seed.radius * (1 + EDGE_PERTURBATION));
 
         List<int[]> offsets = new ArrayList<>();
@@ -481,6 +506,7 @@ public final class KryptosOreGenerator {
             }
             if (!isValidFloor(tile)) {
                 skippedInvalidFloor++;
+                incrementHistogram(rejectedFloorHistogram, tile.floor().name);
                 continue;
             }
 
@@ -491,6 +517,7 @@ public final class KryptosOreGenerator {
             if (dist < effectiveRadius) {
                 tile.setOverlay(ore);
                 placed++;
+                incrementHistogram(acceptedFloorHistogram, tile.floor().name);
             } else {
                 skippedOutsideRadius++;
             }
@@ -555,4 +582,4 @@ public final class KryptosOreGenerator {
             this.radius = radius;
         }
     }
-                 }
+    }
