@@ -23,6 +23,7 @@ public final class KryptosBootstrap {
         initialized = true;
 
         Log.info("Initializing Kryptos systems...");
+        Log.info("Kryptos build timestamp: @", KryptosBuildConfig.BUILD_TIMESTAMP);
 
         // ===========================
         // UI
