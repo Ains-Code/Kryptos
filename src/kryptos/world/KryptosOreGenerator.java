@@ -1,10 +1,15 @@
 package kryptos.world;
 
+import arc.Core;
 import arc.Events;
+import arc.util.Log;
+import arc.util.Timer;
 import kryptos.content.KryptosBlocks;
 import kryptos.util.KryptosNoise;
 import mindustry.content.Blocks;
+import mindustry.game.EventType.SaveLoadEvent;
 import mindustry.game.EventType.WorldLoadEvent;
+import mindustry.world.Block;
 import mindustry.world.Tile;
 import mindustry.world.blocks.environment.OreBlock;
 
@@ -152,6 +157,7 @@ public final class KryptosOreGenerator {
 
     public static void init() {
         Events.on(WorldLoadEvent.class, e -> generate());
+        Events.on(SaveLoadEvent.class, e -> logOreBreakdown("AFTER SAVE RELOAD"));
     }
 
     /**
@@ -159,29 +165,159 @@ public final class KryptosOreGenerator {
      * gather candidate deposit centers, then grow each into a patch.
      */
     private static void generate() {
-        if (!KryptosSectorRules.canGenerate()) return;
-        if (world.tiles == generatedFor) return;
+        Log.info("[Kryptos] WorldLoadEvent fired.");
+        Log.info("[Kryptos] Sector: @", KryptosSectorRules.currentSectorId());
+        Log.info("[Kryptos] world=@x@", world.width(), world.height());
+        Log.info("[Kryptos] DEBUG_REGENERATE=@", DEBUG_REGENERATE);
+        Log.info("[Kryptos] tilesIdentity=@", System.identityHashCode(world.tiles));
+
+        logOverlayIdentities();
+        logOreBreakdown("BEFORE generate()");
+
+        if (!KryptosSectorRules.canGenerate()) {
+            Log.info("[Kryptos] canGenerate()=false, aborting generation.");
+            return;
+        }
+        if (world.tiles == generatedFor) {
+            Log.info("[Kryptos] generatedFor already matches this world.tiles instance, aborting generation.");
+            return;
+        }
 
         OreBlock ore = KryptosBlocks.oreCustom;
-        if (ore == null) return;
+        if (ore == null) {
+            Log.info("[Kryptos] KryptosBlocks.oreCustom is null, aborting generation.");
+            return;
+        }
 
         // Marked before the work runs, not after, so the guard is airtight
         // against re-entry rather than merely unlikely.
         generatedFor = world.tiles;
 
+        int beforeClear = countKryptosOre(ore);
+        Log.info("[Kryptos] Before clear: @", beforeClear);
+
+        int removed = 0;
         if (DEBUG_REGENERATE) {
-            clearPreviousKryptosOre(ore);
+            removed = clearPreviousKryptosOre(ore);
         }
+        Log.info("[Kryptos] Removed: @", removed);
+
+        int afterClear = countKryptosOre(ore);
+        Log.info("[Kryptos] After clear: @", afterClear);
 
         long seed = worldSeed();
         KryptosNoise noise = new KryptosNoise(seed);
         KryptosSectorRules.Density density = KryptosSectorRules.density();
 
-        List<Seed> seeds = collectSeeds(noise, density, seed);
+        int[] candidateCells = new int[1];
+        List<Seed> seeds = collectSeeds(noise, density, seed, candidateCells);
+        Log.info("[Kryptos] Candidate cells: @", candidateCells[0]);
+        Log.info("[Kryptos] Accepted seeds: @", seeds.size());
 
+        int placedTotal = 0;
         for (Seed s : seeds) {
-            createPatch(noise, s, ore);
+            placedTotal += createPatch(noise, s, ore);
         }
+        Log.info("[Kryptos] Placed tiles: @", placedTotal);
+
+        int finalCount = countKryptosOre(ore);
+        Log.info("[Kryptos] Final Kryptos Ore tiles: @", finalCount);
+
+        logOreBreakdown("AFTER generate()");
+        Core.app.post(() -> logOreBreakdown("ONE FRAME LATER"));
+        Timer.schedule(() -> logOreBreakdown("AFTER 5 SECONDS"), 5f);
+    }
+
+    /**
+     * Diagnostic-only: counts every overlaid tile on the map, broken down
+     * by known vanilla ore plus Kryptos Ore, tagged with {@code label} so
+     * the same snapshot shape can be compared across lifecycle points
+     * (before/after generation, a frame later, 5 seconds later, after a
+     * save reload). Kryptos is counted two ways -- by reference equality
+     * to {@link KryptosBlocks#oreCustom} and by overlay name -- so a
+     * mismatch between the two numbers is direct proof that some tiles
+     * carry a *different* "ore-kryptos" Block instance than the one this
+     * generator currently holds a reference to (e.g. stale content after
+     * a reload).
+     */
+    private static void logOreBreakdown(String label) {
+        OreBlock ore = KryptosBlocks.oreCustom;
+
+        int totalOverlay = 0;
+        int copper = 0, lead = 0, coal = 0, titanium = 0, thorium = 0, scrap = 0;
+        int kryptosByRef = 0, kryptosByName = 0;
+
+        for (Tile tile : world.tiles) {
+            if (tile == null) continue;
+
+            Block overlay = tile.overlay();
+            if (overlay == null || overlay == Blocks.air) continue;
+
+            totalOverlay++;
+
+            if (overlay == Blocks.oreCopper) copper++;
+            else if (overlay == Blocks.oreLead) lead++;
+            else if (overlay == Blocks.oreCoal) coal++;
+            else if (overlay == Blocks.oreTitanium) titanium++;
+            else if (overlay == Blocks.oreThorium) thorium++;
+            else if (overlay == Blocks.oreScrap) scrap++;
+
+            if (ore != null && overlay == ore) kryptosByRef++;
+            if ("ore-kryptos".equals(overlay.name)) kryptosByName++;
+        }
+
+        Log.info("[Kryptos] Ore breakdown @", label);
+        Log.info("[Kryptos]   Total overlay tiles: @", totalOverlay);
+        Log.info("[Kryptos]   Copper: @", copper);
+        Log.info("[Kryptos]   Lead: @", lead);
+        Log.info("[Kryptos]   Coal: @", coal);
+        Log.info("[Kryptos]   Titanium: @", titanium);
+        Log.info("[Kryptos]   Thorium: @", thorium);
+        Log.info("[Kryptos]   Scrap: @", scrap);
+        Log.info("[Kryptos]   Kryptos (by reference ==): @", kryptosByRef);
+        Log.info("[Kryptos]   Kryptos (by name match): @", kryptosByName);
+        if (kryptosByRef != kryptosByName) {
+            Log.info("[Kryptos]   WARNING: reference count != name count -- a different 'ore-kryptos' Block instance is present on some tiles (stale content reload?).");
+        }
+    }
+
+    /** Diagnostic-only: counts tiles whose overlay is this specific Kryptos Ore instance. */
+    private static int countKryptosOre(OreBlock ore) {
+        int count = 0;
+        for (Tile tile : world.tiles) {
+            if (tile == null) continue;
+            if (tile.overlay() == ore) count++;
+        }
+        return count;
+    }
+
+    /**
+     * Diagnostic-only: prints identity info for the first 20 tiles carrying
+     * any overlay at all, plus the identity hash of {@link KryptosBlocks#oreCustom}
+     * itself, so overlay reference-equality issues (e.g. a stale/duplicate
+     * {@code oreCustom} instance from a reload) can be verified directly
+     * from the logs instead of inferred.
+     */
+    private static void logOverlayIdentities() {
+        int printed = 0;
+        for (Tile tile : world.tiles) {
+            if (printed >= 20) break;
+            if (tile == null) continue;
+
+            Block overlay = tile.overlay();
+            if (overlay == null || overlay == Blocks.air) continue;
+
+            Log.info("[Kryptos] Overlay:");
+            Log.info("[Kryptos] @,@", tile.x, tile.y);
+            Log.info("[Kryptos] @", overlay.name);
+            Log.info("[Kryptos] @", overlay.getClass().getSimpleName());
+            Log.info("[Kryptos] @", System.identityHashCode(overlay));
+
+            printed++;
+        }
+
+        Log.info("[Kryptos] KryptosBlocks.oreCustom identity:");
+        Log.info("[Kryptos] @", System.identityHashCode(KryptosBlocks.oreCustom));
     }
 
     /**
@@ -198,13 +334,16 @@ public final class KryptosOreGenerator {
      * object gets reset, and it's reset to {@code Blocks.air} -- Mindustry's
      * "no overlay" value -- not {@code null}.
      */
-    private static void clearPreviousKryptosOre(OreBlock ore) {
+    private static int clearPreviousKryptosOre(OreBlock ore) {
+        int removed = 0;
         for (Tile tile : world.tiles) {
             if (tile == null) continue;
             if (tile.overlay() == ore) {
                 tile.setOverlay(Blocks.air);
+                removed++;
             }
         }
+        return removed;
     }
 
     /**
@@ -213,7 +352,7 @@ public final class KryptosOreGenerator {
      * threshold on the coarse region field) and far enough from every
      * previously accepted seed that their eventual patches cannot touch.
      */
-    private static List<Seed> collectSeeds(KryptosNoise noise, KryptosSectorRules.Density density, long seed) {
+    private static List<Seed> collectSeeds(KryptosNoise noise, KryptosSectorRules.Density density, long seed, int[] candidateCellsOut) {
         List<Seed> accepted = new ArrayList<>();
 
         int width = world.width();
@@ -221,6 +360,8 @@ public final class KryptosOreGenerator {
 
         for (int gx = 0; gx < width; gx += GRID_SPACING) {
             for (int gy = 0; gy < height; gy += GRID_SPACING) {
+                candidateCellsOut[0]++;
+
                 double jitterX = (KryptosNoise.hash01(gx, gy, seed ^ SALT_JITTER_X) - 0.5) * GRID_SPACING * JITTER_FRACTION;
                 double jitterY = (KryptosNoise.hash01(gx, gy, seed ^ SALT_JITTER_Y) - 0.5) * GRID_SPACING * JITTER_FRACTION;
 
@@ -262,7 +403,7 @@ public final class KryptosOreGenerator {
      * each tile's effective inclusion radius is perturbed by fine noise
      * so the boundary is never a perfect circle, square, or straight edge.
      */
-    private static void createPatch(KryptosNoise noise, Seed seed, OreBlock ore) {
+    private static int createPatch(KryptosNoise noise, Seed seed, OreBlock ore) {
         int reach = (int) Math.ceil(seed.radius * (1 + EDGE_PERTURBATION));
 
         List<int[]> offsets = new ArrayList<>();
@@ -296,6 +437,8 @@ public final class KryptosOreGenerator {
                 placed++;
             }
         }
+
+        return placed;
     }
 
     /**
@@ -350,4 +493,4 @@ public final class KryptosOreGenerator {
             this.radius = radius;
         }
     }
-}
+                 }
