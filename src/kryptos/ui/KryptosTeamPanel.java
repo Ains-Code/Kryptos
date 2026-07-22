@@ -122,6 +122,7 @@ public class KryptosTeamPanel {
 
     private static void refreshUnits() {
         if (unitsContent == null || !unitsContainer.visible) return;
+        if (!Vars.state.isGame() || Vars.player == null) return;
         unitsContent.clearChildren();
 
         Team own = Vars.player.team();
@@ -148,6 +149,7 @@ public class KryptosTeamPanel {
 
     private static void refreshMinerals() {
         if (mineralsContent == null || !mineralsContainer.visible) return;
+        if (!Vars.state.isGame() || Vars.player == null) return;
         mineralsContent.clearChildren();
 
         Team own = Vars.player.team();
