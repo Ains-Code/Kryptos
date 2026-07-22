@@ -2,101 +2,73 @@ package kryptos.automation;
 
 import arc.Events;
 import arc.math.geom.Point2;
+import arc.math.geom.Vec2;
+import arc.struct.IntIntMap;
 import arc.struct.IntSeq;
 import arc.struct.IntSet;
+import arc.struct.ObjectSet;
+import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
+import arc.util.Tmp;
 import kryptos.ui.KryptosAutomationPanel;
 import kryptos.ui.KryptosHud;
 import mindustry.Vars;
 import mindustry.content.Blocks;
+import mindustry.content.UnitTypes;
 import mindustry.entities.units.BuildPlan;
 import mindustry.game.EventType.Trigger;
 import mindustry.game.EventType.WorldLoadEvent;
 import mindustry.game.Team;
 import mindustry.gen.Building;
+import mindustry.gen.Building;
 import mindustry.gen.Unit;
+import mindustry.type.UnitType;
 import mindustry.world.Block;
 import mindustry.world.Tile;
-import mindustry.world.blocks.distribution.Conveyor;
+import mindustry.world.blocks.distribution.*;
+import mindustry.world.blocks.environment.OreBlock;
+import mindustry.world.blocks.production.Drill;
+import mindustry.world.consumers.Consume;
 import mindustry.world.blocks.environment.OreBlock;
 
 import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.PriorityQueue;
 
 import static mindustry.Vars.world;
 
-/**
- * "Auto Conveyor" automation module -- toggled from {@link KryptosAutomationPanel},
- * which itself only appears while {@link KryptosHud#autoplay} is on.
- *
- * <h2>What it does</h2>
- * Every {@link #SCAN_INTERVAL_TICKS} ticks (or immediately after being
- * switched on, see {@link #requestImmediateScan()}) it:
- * <ol>
- *   <li>Scans the loaded world for ore ({@link Tile#overlay()} instanceof
- *   {@link OreBlock}) and groups contiguous same-type ore into deposits
- *   (flood fill).</li>
- *   <li>For each deposit not yet served, finds the walkable tile bordering
- *   it that is closest to the player's core -- that tile becomes the belt's
- *   starting point (a drill placed on the ore later would feed directly
- *   into it).</li>
- *   <li>Runs a breadth-first search from that tile to the core (walkable =
- *   non-solid, non-liquid, empty or already-a-conveyor tiles) to build an
- *   actual buildable route, not just a straight line through walls.</li>
- *   <li>Queues one {@link Blocks#conveyor} {@link BuildPlan} per path tile,
- *   correctly rotated, onto {@code Vars.player.unit()}. Construction itself
- *   is handled entirely by the game's existing build-queue system (the same
- *   one used when a player shift-clicks a multi-tile belt run), so it stays
- *   resource-consuming, deterministic, and multiplayer-safe -- this class
- *   never touches {@code Tile.setBlock} directly.</li>
- * </ol>
- *
- * <h2>Explicit scope (per design decision)</h2>
- * This module does not place drills and does not infer them. It only lays
- * conveyor infrastructure from bare ore tiles to the core, so any drill
- * dropped on that ore afterwards already has an outbound belt.
- *
- * <h2>Performance</h2>
- * The full-grid classification scan is real -- there is no per-frame
- * incremental scanner -- but it only walks a boolean-per-tile buffer
- * ({@link #ensureVisitedBuffer()}, allocated once per world and reused) and
- * is gated behind {@link #SCAN_INTERVAL_TICKS}, so it runs at most once
- * every ~10 seconds while enabled. Once a tile has been classified (ore
- * cluster member, or not-ore) it is never re-examined, so the *cost* of
- * repeated scans drops to near-zero after the first pass; only genuinely
- * new/unserved deposits do any BFS work, and at most
- * {@link #MAX_DEPOSITS_PER_CYCLE} of those per cycle.
- */
 public final class KryptosAutoConveyor {
 
-    private static final float SCAN_INTERVAL_TICKS = 60f * 10f; // ~10s between full scans
+    private static final float SCAN_INTERVAL_TICKS = 60f * 10f;
     private static final int MAX_DEPOSITS_PER_CYCLE = 3;
     private static final int MIN_CLUSTER_TILES = 2;
-    private static final int MAX_PATH_SEARCH_TILES = 20_000; // BFS node budget per deposit
-    private static final int MAX_PATH_LENGTH = 220; // discard routes longer than this
+    private static final int MAX_PATH_SEARCH_TILES = 20000;
+    private static final int MAX_PATH_LENGTH = 220;
+    private static final int MAX_BRIDGE_LENGTH = 11;
+    private static final int BRIDGE_SEARCH_RANGE = 15;
+    private static final float DRILL_COVERAGE_RADIUS = 1.5f;
 
-    // Cardinal directions; index doubles as Mindustry's block rotation value
-    // (0 = right/east, 1 = up/north, 2 = left/west, 3 = down/south).
-    private static final int[] DX = {1, 0, -1, 0};
-    private static final int[] DY = {0, 1, 0, -1};
+    private static final int[] DX4 = {1, 0, -1, 0};
+    private static final int[] DY4 = {0, 1, 0, -1};
+    private static final int[] DX8 = {1, 1, 0, -1, -1, -1, 0, 1};
+    private static final int[] DY8 = {0, 1, 1, 1, 0, -1, -1, -1};
 
     private static boolean[] visited;
     private static int visitedW, visitedH;
 
     private static final IntSet servedDeposits = new IntSet();
     private static float lastScanTime = -SCAN_INTERVAL_TICKS;
+    private static final IntIntMap depositCoreDist = new IntIntMap();
 
-    private KryptosAutoConveyor() {
-        // Utility class
-    }
+    private KryptosAutoConveyor() {}
 
     public static void init() {
         Events.on(WorldLoadEvent.class, e -> reset());
         Events.run(Trigger.update, KryptosAutoConveyor::update);
     }
 
-    /** Forces the next update tick to run a scan immediately instead of waiting for the interval. */
     public static void requestImmediateScan() {
         lastScanTime = -SCAN_INTERVAL_TICKS - 1f;
     }
@@ -108,6 +80,7 @@ public final class KryptosAutoConveyor {
     private static void reset() {
         visited = null;
         servedDeposits.clear();
+        depositCoreDist.clear();
         lastScanTime = -SCAN_INTERVAL_TICKS;
     }
 
@@ -156,29 +129,27 @@ public final class KryptosAutoConveyor {
                     continue;
                 }
 
-                IntSeq cluster = floodFillCluster(tile, overlay, seenTiles, w, h);
+                OreBlock ore = (OreBlock) overlay;
+                IntSeq cluster = floodFillCluster(tile, ore, seenTiles, w, h);
                 if (cluster.size < MIN_CLUSTER_TILES) continue;
 
                 int key = clusterKey(cluster);
                 if (servedDeposits.contains(key)) continue;
 
-                Tile anchor = findAnchorTile(cluster, coreX, coreY);
-                if (anchor == null) continue;
+                DrillPlacement placement = findBestDrillPlacement(cluster, ore, coreX, coreY);
+                if (placement == null) {
+                    servedDeposits.add(key);
+                    continue;
+                }
 
-                IntSeq path = findPathToCore(anchor, core, w, h);
-                // Whether or not a path was found, don't retry this exact
-                // deposit shape again until the world reloads -- either it
-                // built successfully, or the core is genuinely unreachable
-                // from it and re-attempting every cycle would be wasted work.
-                servedDeposits.add(key);
+                IntSeq path = findPathAStar(placement.conveyorX, placement.conveyorY, core, w, h);
+                if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) {
+                    servedDeposits.add(key);
+                    continue;
+                }
 
-                if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) continue;
-
-                queueConveyorPlan(path, core);
+                serveDeposit(cluster, key, placement, path, core, ore);
                 queuedThisCycle++;
-
-                Log.info("[Kryptos] AutoConveyor: queued @ belt tile(s) from ore near @,@ to core.",
-                        path.size, anchor.x, anchor.y);
             }
         }
     }
@@ -194,7 +165,6 @@ public final class KryptosAutoConveyor {
         return visited;
     }
 
-    /** 4-directional flood fill over tiles sharing the exact same ore overlay block. */
     private static IntSeq floodFillCluster(Tile start, Block overlay, boolean[] seenTiles, int w, int h) {
         IntSeq cluster = new IntSeq();
         ArrayDeque<Integer> queue = new ArrayDeque<>();
@@ -209,8 +179,8 @@ public final class KryptosAutoConveyor {
             cluster.add(packed);
 
             for (int dir = 0; dir < 4; dir++) {
-                int nx = x + DX[dir];
-                int ny = y + DY[dir];
+                int nx = x + DX4[dir];
+                int ny = y + DY4[dir];
                 if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
 
                 int nIdx = ny * w + nx;
@@ -230,7 +200,6 @@ public final class KryptosAutoConveyor {
         return cluster;
     }
 
-    /** Stable per-deposit key (its lowest packed tile position) used to avoid re-serving the same deposit. */
     private static int clusterKey(IntSeq cluster) {
         int min = Integer.MAX_VALUE;
         for (int i = 0; i < cluster.size; i++) {
@@ -239,56 +208,153 @@ public final class KryptosAutoConveyor {
         return min;
     }
 
-    /** The walkable tile bordering the cluster that is closest (Manhattan) to the core. */
-    private static Tile findAnchorTile(IntSeq cluster, int coreX, int coreY) {
-        IntSet clusterSet = new IntSet();
+    private static DrillPlacement findBestDrillPlacement(IntSeq cluster, OreBlock ore, int coreX, int coreY) {
+        Drill bestDrill = findBestDrillForOre(ore);
+        if (bestDrill == null) return null;
+
+        int drillSize = bestDrill.size;
+        int drillRadius = drillSize / 2;
+        int coverage = bestDrill.drillTime > 0 ? (int) Math.ceil(DRILL_COVERAGE_RADIUS * drillSize) : drillSize;
+
+        Seq<DrillPlacement> candidates = new Seq<>();
+
         for (int i = 0; i < cluster.size; i++) {
-            clusterSet.add(cluster.items[i]);
+            int cx = Point2.x(cluster.items[i]);
+            int cy = Point2.y(cluster.items[i]);
+
+            for (int dx = -drillRadius; dx <= drillRadius; dx++) {
+                for (int dy = -drillRadius; dy <= drillRadius; dy++) {
+                    int dx_ = cx + dx;
+                    int dy_ = cy + dy;
+
+                    if (dx_ < 0 || dy_ < 0 || dx_ >= world.width() || dy_ >= world.height()) continue;
+
+                    if (canPlaceDrill(dx_, dy_, drillSize, ore)) {
+                        int covered = countOreCovered(dx_, dy_, drillSize, coverage, ore);
+                        if (covered > 0) {
+                            Tile conveyorTile = findBestConveyorTile(dx_, dy_, drillSize, coreX, coreY);
+                            if (conveyorTile != null) {
+                                int dist = Math.abs(conveyorTile.x - coreX) + Math.abs(conveyorTile.y - coreY);
+                                candidates.add(new DrillPlacement(dx_, dy_, conveyorTile.x, conveyorTile.y, covered, dist, bestDrill));
+                            }
+                        }
+                    }
+                }
+            }
         }
 
+        if (candidates.isEmpty()) return null;
+
+        candidates.sort(Comparator.<DrillPlacement>comparingInt(p -> -p.covered)
+            .thenComparingInt(p -> p.coreDist));
+
+        return candidates.first();
+    }
+
+    private static Drill findBestDrillForOre(OreBlock ore) {
+        Seq<Drill> drills = Vars.content.drills();
+        Drill best = null;
+        int bestTier = -1;
+
+        for (Drill drill : drills) {
+            if (!drill.unlockedNow() && !Vars.state.rules.infiniteResources) continue;
+            if (drill.drillTime <= 0) continue;
+            if (drill.minerItem != null && !Vars.state.rules.infiniteResources) continue;
+
+            if (drill.tier > bestTier) {
+                bestTier = drill.tier;
+                best = drill;
+            }
+        }
+
+        return best != null ? best : Vars.content.drills().first();
+    }
+
+    private static boolean canPlaceDrill(int x, int y, int size, OreBlock ore) {
+        int half = size / 2;
+        for (int dx = -half; dx <= half; dx++) {
+            for (int dy = -half; dy <= half; dy++) {
+                Tile t = world.tile(x + dx, y + dy);
+                if (t == null) return false;
+                if (t.block() != Blocks.air && !(t.block() instanceof OreBlock)) return false;
+                if (t.floor().isLiquid) return false;
+                if (t.build() != null && !(t.build().block instanceof OreBlock)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static int countOreCovered(int cx, int cy, int size, int coverage, OreBlock ore) {
+        int count = 0;
+        int half = size / 2;
+        int range = half + coverage;
+
+        for (int dx = -range; dx <= range; dx++) {
+            for (int dy = -range; dy <= range; dy++) {
+                if (dx * dx + dy * dy > range * range) continue;
+                int x = cx + dx;
+                int y = cy + dy;
+                if (x < 0 || y < 0 || x >= world.width() || y >= world.height()) continue;
+                Tile t = world.tile(x, y);
+                if (t != null && t.overlay() == ore) count++;
+            }
+        }
+        return count;
+    }
+
+    private static Tile findBestConveyorTile(int drillX, int drillY, int drillSize, int coreX, int coreY) {
+        int half = drillSize / 2;
         Tile best = null;
         int bestDist = Integer.MAX_VALUE;
 
-        for (int i = 0; i < cluster.size; i++) {
-            int x = Point2.x(cluster.items[i]);
-            int y = Point2.y(cluster.items[i]);
+        for (int dir = 0; dir < 4; dir++) {
+            int cx = drillX + DX4[dir] * (half + 1);
+            int cy = drillY + DY4[dir] * (half + 1);
 
-            for (int dir = 0; dir < 4; dir++) {
-                int nx = x + DX[dir];
-                int ny = y + DY[dir];
-                Tile neighbor = world.tile(nx, ny);
-                if (neighbor == null || clusterSet.contains(neighbor.pos())) continue;
-                if (!isWalkable(neighbor)) continue;
+            if (cx < 0 || cy < 0 || cx >= world.width() || cy >= world.height()) continue;
 
-                int dist = Math.abs(nx - coreX) + Math.abs(ny - coreY);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    best = neighbor;
-                }
+            Tile t = world.tile(cx, cy);
+            if (t == null) continue;
+            if (!isConveyorWalkable(t)) continue;
+
+            int dist = Math.abs(cx - coreX) + Math.abs(cy - coreY);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = t;
             }
         }
 
         return best;
     }
 
-    /** Breadth-first search from {@code anchor} to any tile orthogonally touching {@code core}. */
-    private static IntSeq findPathToCore(Tile anchor, Building core, int w, int h) {
-        boolean[] seen = new boolean[w * h];
-        int[] prevIdx = new int[w * h];
-        Arrays.fill(prevIdx, -1);
+    private static IntSeq findPathAStar(int startX, int startY, Building core, int w, int h) {
+        int startIdx = startY * w + startX;
+        int coreX = core.tile.x;
+        int coreY = core.tile.y;
 
-        int startIdx = anchor.y * w + anchor.x;
-        seen[startIdx] = true;
+        boolean[] closed = new boolean[w * h];
+        int[] prev = new int[w * h];
+        float[] gScore = new float[w * h];
+        float[] fScore = new float[w * h];
+        Arrays.fill(gScore, Float.MAX_VALUE);
+        Arrays.fill(fScore, Float.MAX_VALUE);
+        Arrays.fill(prev, -1);
 
-        ArrayDeque<Integer> queue = new ArrayDeque<>();
-        queue.add(startIdx);
+        PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
+        gScore[startIdx] = 0;
+        fScore[startIdx] = heuristic(startX, startY, coreX, coreY);
+        open.add(new Node(startIdx, fScore[startIdx]));
 
         int goalIdx = -1;
         int steps = 0;
 
-        while (!queue.isEmpty() && steps < MAX_PATH_SEARCH_TILES) {
-            int idx = queue.poll();
+        while (!open.isEmpty() && steps < MAX_PATH_SEARCH_TILES) {
+            Node current = open.poll();
+            int idx = current.idx;
             steps++;
+
+            if (closed[idx]) continue;
+            closed[idx] = true;
 
             int x = idx % w;
             int y = idx / w;
@@ -299,32 +365,84 @@ public final class KryptosAutoConveyor {
             }
 
             for (int dir = 0; dir < 4; dir++) {
-                int nx = x + DX[dir];
-                int ny = y + DY[dir];
+                int nx = x + DX4[dir];
+                int ny = y + DY4[dir];
                 if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
 
                 int nIdx = ny * w + nx;
-                if (seen[nIdx]) continue;
+                if (closed[nIdx]) continue;
 
-                Tile neighbor = world.tile(nx, ny);
-                if (!isWalkable(neighbor)) continue;
+                Tile t = world.tile(nx, ny);
+                if (!isConveyorWalkable(t)) continue;
 
-                seen[nIdx] = true;
-                prevIdx[nIdx] = idx;
-                queue.add(nIdx);
+                float tentativeG = gScore[idx] + moveCost(t, dir);
+
+                if (tentativeG < gScore[nIdx]) {
+                    prev[nIdx] = idx;
+                    gScore[nIdx] = tentativeG;
+                    fScore[nIdx] = tentativeG + heuristic(nx, ny, coreX, coreY);
+                    open.add(new Node(nIdx, fScore[nIdx]));
+                }
             }
         }
 
-        if (goalIdx == -1) return null;
+        if (goalIdx == -1) {
+            return tryBridgePath(startX, startY, core, w, h);
+        }
 
+        return reconstructPath(prev, goalIdx, w);
+    }
+
+    private static IntSeq tryBridgePath(int startX, int startY, Building core, int w, int h) {
+        int coreX = core.tile.x;
+        int coreY = core.tile.y;
+
+        for (int dir = 0; dir < 4; dir++) {
+            for (int len = 2; len <= MAX_BRIDGE_LENGTH; len++) {
+                int bx = startX + DX4[dir] * len;
+                int by = startY + DY4[dir] * len;
+                if (bx < 0 || by < 0 || bx >= w || by >= h) break;
+
+                if (isConveyorWalkable(world.tile(bx, by))) {
+                    IntSeq path = findPathAStar(bx, by, core, w, h);
+                    if (path != null && path.size > 0) {
+                        IntSeq bridgePath = new IntSeq();
+                        for (int l = 1; l <= len; l++) {
+                            int bx2 = startX + DX4[dir] * l;
+                            int by2 = startY + DY4[dir] * l;
+                            bridgePath.add(Point2.pack(bx2, by2));
+                        }
+                        for (int i = 0; i < path.size; i++) {
+                            bridgePath.add(path.items[i]);
+                        }
+                        return bridgePath;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static float heuristic(int x, int y, int goalX, int goalY) {
+        return Math.abs(x - goalX) + Math.abs(y - goalY);
+    }
+
+    private static float moveCost(Tile t, int dir) {
+        Block b = t.block();
+        if (b == Blocks.air) return 1f;
+        if (b instanceof Conveyor) return 0.5f;
+        if (b instanceof BridgeConveyor) return 0.8f;
+        if (b instanceof Junction) return 0.6f;
+        return 1f;
+    }
+
+    private static IntSeq reconstructPath(int[] prev, int goalIdx, int w) {
         IntSeq path = new IntSeq();
         int cur = goalIdx;
         while (cur != -1) {
             path.add(Point2.pack(cur % w, cur / w));
-            cur = prevIdx[cur];
+            cur = prev[cur];
         }
-        // Built backwards (goal -> anchor); flip in place so index 0 is the
-        // anchor tile, matching what queueConveyorPlan() expects.
         for (int a = 0, b = path.size - 1; a < b; a++, b--) {
             int tmp = path.items[a];
             path.items[a] = path.items[b];
@@ -333,33 +451,40 @@ public final class KryptosAutoConveyor {
         return path;
     }
 
-    /** Ground the belt can occupy: not solid, not liquid, and either empty or already a conveyor. */
-    private static boolean isWalkable(Tile t) {
+    private static boolean isConveyorWalkable(Tile t) {
         if (t == null) return false;
         if (t.floor().isLiquid) return false;
         if (t.solid()) return false;
-        Block block = t.block();
-        return block == Blocks.air || block instanceof Conveyor;
+        Block b = t.block();
+        return b == Blocks.air || b instanceof Conveyor || b instanceof BridgeConveyor || b instanceof Junction || b instanceof Router;
     }
 
     private static boolean touchesCore(int x, int y, Building core) {
         for (int dir = 0; dir < 4; dir++) {
-            Tile neighbor = world.tile(x + DX[dir], y + DY[dir]);
-            if (neighbor != null && neighbor.build == core) return true;
+            Tile n = world.tile(x + DX4[dir], y + DY4[dir]);
+            if (n != null && n.build == core) return true;
         }
         return false;
     }
 
-    private static void queueConveyorPlan(IntSeq path, Building core) {
+    private static void serveDeposit(IntSeq cluster, int key, DrillPlacement placement, IntSeq path, Building core, OreBlock ore) {
+        servedDeposits.add(key);
+
         Unit unit = Vars.player.unit();
         if (unit == null) return;
+
+        Seq<BuildPlan> plans = new Seq<>();
+
+        Drill bestDrill = findBestDrillForOre(ore);
+        if (bestDrill != null && canPlaceDrill(placement.drillX, placement.drillY, bestDrill.size, ore)) {
+            plans.add(new BuildPlan(placement.drillX, placement.drillY, 0, bestDrill));
+        }
 
         for (int i = 0; i < path.size; i++) {
             int x = Point2.x(path.items[i]);
             int y = Point2.y(path.items[i]);
-
             Tile tile = world.tile(x, y);
-            if (tile == null || tile.block() instanceof Conveyor) continue; // already built, skip
+            if (tile == null || tile.block() instanceof Conveyor) continue;
 
             int rotation;
             if (i < path.size - 1) {
@@ -370,23 +495,76 @@ public final class KryptosAutoConveyor {
                 rotation = rotationTowardCore(x, y, core);
             }
 
-            unit.addBuild(new BuildPlan(x, y, rotation, Blocks.conveyor));
+            Block conveyorType = selectConveyorType(i, path.size, tile);
+            plans.add(new BuildPlan(x, y, rotation, conveyorType));
         }
+
+        for (BuildPlan plan : plans) {
+            unit.addBuild(plan);
+        }
+
+        Log.info("[Kryptos] AutoConveyor: queued @ drill + @ belts from @,@ ore to core.",
+                plans.size, path.size, placement.drillX, placement.drillY);
+    }
+
+    private static Block selectConveyorType(int index, int pathLength, Tile tile) {
+        Block existing = tile.block();
+        if (existing instanceof Conveyor) return existing;
+
+        if (index == pathLength - 1) {
+            return Blocks.conveyor;
+        }
+
+        if (Vars.state.rules.infiniteResources || Vars.player.team().core() != null) {
+            if (Vars.content.getByName(ContentType.block, "titanium-conveyor") != null && 
+                Vars.state.rules.infiniteResources || hasTitanium()) {
+                return Blocks.titaniumConveyor;
+            }
+        }
+
+        return Blocks.conveyor;
+    }
+
+    private static boolean hasTitanium() {
+        return Vars.player.team().countItem(Items.titanium) > 50;
     }
 
     private static int rotationFor(int dx, int dy) {
         for (int dir = 0; dir < 4; dir++) {
-            if (DX[dir] == dx && DY[dir] == dy) return dir;
+            if (DX4[dir] == dx && DY4[dir] == dy) return dir;
         }
         return 0;
     }
 
     private static int rotationTowardCore(int x, int y, Building core) {
         for (int dir = 0; dir < 4; dir++) {
-            Tile neighbor = world.tile(x + DX[dir], y + DY[dir]);
+            Tile neighbor = world.tile(x + DX4[dir], y + DY4[dir]);
             if (neighbor != null && neighbor.build == core) return dir;
         }
         return 0;
     }
-                }
-                    
+
+    private static class DrillPlacement {
+        final int drillX, drillY;
+        final int conveyorX, conveyorY;
+        final int covered;
+        final int coreDist;
+        final Drill drill;
+
+        DrillPlacement(int dx, int dy, int cx, int cy, int covered, int dist, Drill drill) {
+            this.drillX = dx;
+            this.drillY = dy;
+            this.conveyorX = cx;
+            this.conveyorY = cy;
+            this.covered = covered;
+            this.coreDist = dist;
+            this.drill = drill;
+        }
+    }
+
+    private static class Node {
+        final int idx;
+        final float f;
+        Node(int idx, float f) { this.idx = idx; this.f = f; }
+    }
+}
