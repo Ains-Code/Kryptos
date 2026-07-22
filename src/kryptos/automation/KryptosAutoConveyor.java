@@ -2,40 +2,38 @@ package kryptos.automation;
 
 import arc.Events;
 import arc.math.geom.Point2;
-import arc.math.geom.Vec2;
 import arc.struct.IntIntMap;
 import arc.struct.IntSeq;
 import arc.struct.IntSet;
-import arc.struct.ObjectSet;
+import arc.struct.ObjectMap;
 import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
-import arc.util.Tmp;
 import kryptos.ui.KryptosAutomationPanel;
 import kryptos.ui.KryptosHud;
 import mindustry.Vars;
 import mindustry.content.Blocks;
-import mindustry.content.UnitTypes;
+import mindustry.content.Items;
 import mindustry.entities.units.BuildPlan;
 import mindustry.game.EventType.Trigger;
 import mindustry.game.EventType.WorldLoadEvent;
 import mindustry.game.Team;
 import mindustry.gen.Building;
-import mindustry.gen.Building;
 import mindustry.gen.Unit;
-import mindustry.type.UnitType;
+import mindustry.type.Item;
 import mindustry.world.Block;
 import mindustry.world.Tile;
-import mindustry.world.blocks.distribution.*;
-import mindustry.world.blocks.environment.OreBlock;
 import mindustry.world.blocks.production.Drill;
-import mindustry.world.consumers.Consume;
 import mindustry.world.blocks.environment.OreBlock;
+import mindustry.world.blocks.distribution.Conveyor;
+import mindustry.world.blocks.distribution.Junction;
+import mindustry.world.blocks.distribution.Router;
+import mindustry.world.blocks.distribution.MassDriver;
 
 import java.util.ArrayDeque;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.PriorityQueue;
+import java.util.Arrays;
 
 import static mindustry.Vars.world;
 
@@ -252,14 +250,15 @@ public final class KryptosAutoConveyor {
     }
 
     private static Drill findBestDrillForOre(OreBlock ore) {
-        Seq<Drill> drills = Vars.content.drills();
+        Seq<Block> blocks = Vars.content.blocks();
         Drill best = null;
         int bestTier = -1;
 
-        for (Drill drill : drills) {
+        for (Block block : blocks) {
+            if (!(block instanceof Drill)) continue;
+            Drill drill = (Drill) block;
             if (!drill.unlockedNow() && !Vars.state.rules.infiniteResources) continue;
             if (drill.drillTime <= 0) continue;
-            if (drill.minerItem != null && !Vars.state.rules.infiniteResources) continue;
 
             if (drill.tier > bestTier) {
                 bestTier = drill.tier;
@@ -267,7 +266,15 @@ public final class KryptosAutoConveyor {
             }
         }
 
-        return best != null ? best : Vars.content.drills().first();
+        return best != null ? best : findAnyDrill();
+    }
+
+    private static Drill findAnyDrill() {
+        Seq<Block> blocks = Vars.content.blocks();
+        for (Block block : blocks) {
+            if (block instanceof Drill) return (Drill) block;
+        }
+        return null;
     }
 
     private static boolean canPlaceDrill(int x, int y, int size, OreBlock ore) {
@@ -278,7 +285,7 @@ public final class KryptosAutoConveyor {
                 if (t == null) return false;
                 if (t.block() != Blocks.air && !(t.block() instanceof OreBlock)) return false;
                 if (t.floor().isLiquid) return false;
-                if (t.build() != null && !(t.build().block instanceof OreBlock)) return false;
+                if (t.build != null && !(t.build.block instanceof OreBlock)) return false;
             }
         }
         return true;
@@ -431,7 +438,7 @@ public final class KryptosAutoConveyor {
         Block b = t.block();
         if (b == Blocks.air) return 1f;
         if (b instanceof Conveyor) return 0.5f;
-        if (b instanceof BridgeConveyor) return 0.8f;
+        if (b instanceof MassDriver) return 0.8f;
         if (b instanceof Junction) return 0.6f;
         return 1f;
     }
@@ -456,7 +463,7 @@ public final class KryptosAutoConveyor {
         if (t.floor().isLiquid) return false;
         if (t.solid()) return false;
         Block b = t.block();
-        return b == Blocks.air || b instanceof Conveyor || b instanceof BridgeConveyor || b instanceof Junction || b instanceof Router;
+        return b == Blocks.air || b instanceof Conveyor || b instanceof MassDriver || b instanceof Junction || b instanceof Router;
     }
 
     private static boolean touchesCore(int x, int y, Building core) {
@@ -515,18 +522,15 @@ public final class KryptosAutoConveyor {
             return Blocks.conveyor;
         }
 
-        if (Vars.state.rules.infiniteResources || Vars.player.team().core() != null) {
-            if (Vars.content.getByName(ContentType.block, "titanium-conveyor") != null && 
-                Vars.state.rules.infiniteResources || hasTitanium()) {
-                return Blocks.titaniumConveyor;
-            }
+        if (Vars.state.rules.infiniteResources || hasTitanium()) {
+            return Blocks.titaniumConveyor;
         }
 
         return Blocks.conveyor;
     }
 
     private static boolean hasTitanium() {
-        return Vars.player.team().countItem(Items.titanium) > 50;
+        return Vars.player.team().core().items.get(Items.titanium) > 50;
     }
 
     private static int rotationFor(int dx, int dy) {

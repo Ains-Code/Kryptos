@@ -11,7 +11,9 @@ import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.Label;
 import arc.scene.ui.layout.Table;
 import kryptos.automation.KryptosAutoConveyor;
+import kryptos.automation.KryptosSmartDrill;
 import mindustry.content.Blocks;
+import mindustry.content.Items;
 import mindustry.ui.Styles;
 
 import static mindustry.Vars.ui;
@@ -20,9 +22,9 @@ import static mindustry.Vars.ui;
  * The "many different automations" panel requested alongside Autoplay --
  * only visible while {@link KryptosHud#autoplay} is on (see the wiring in
  * {@link KryptosHud#build()}). Each automation gets one toggle row here;
- * this module ships with a single one, Auto Conveyor
- * ({@link KryptosAutoConveyor}), and is built so more can be added the same
- * way later (one more {@code KryptosHud.addToggle} call).
+ * this module ships with Auto Conveyor ({@link KryptosAutoConveyor}) and
+ * Smart Drill ({@link KryptosSmartDrill}), and is built so more can be
+ * added the same way later.
  *
  * Follows the same draggable-panel-with-remembered-position pattern as
  * {@link KryptosTeamPanel}.
@@ -41,6 +43,9 @@ public class KryptosAutomationPanel {
     /** Master switch for the auto-conveyor module; read by {@link KryptosAutoConveyor}. */
     public static boolean autoConveyor = false;
 
+    /** Master switch for the smart drill module; read by {@link KryptosSmartDrill}. */
+    public static boolean autoSmartDrill = false;
+
     private static Table container;
     private static Table content;
     private static Label statusLabel;
@@ -58,9 +63,18 @@ public class KryptosAutomationPanel {
                 });
         content.row();
 
+        KryptosHud.addToggle(content, new TextureRegionDrawable(Items.titanium.uiIcon),
+                "Smart Drill", () -> autoSmartDrill, b -> {
+                    autoSmartDrill = b;
+                    if (b) KryptosSmartDrill.requestImmediateScan();
+                });
+        content.row();
+
         statusLabel = new Label("");
         statusLabel.setColor(STATUS_COLOR);
-        statusLabel.update(() -> statusLabel.setText("Served: " + KryptosAutoConveyor.servedCount()));
+        statusLabel.update(() -> statusLabel.setText(
+            "Conveyor: " + KryptosAutoConveyor.servedCount() + " | Drill: active"
+        ));
         content.add(statusLabel).left().padTop(4f);
 
         container = wrapDraggable(content, SETTING_X, SETTING_Y, DEFAULT_X, DEFAULT_Y);

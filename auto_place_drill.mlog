@@ -1,0 +1,157 @@
+getlink core 0
+getlink builder 1
+getlink drillCopper 10
+getlink drillLead 11
+getlink drillTitanium 12
+getlink drillThorium 13
+getlink drillScrap 14
+getlink drillSilicon 13
+getlink drillPhase 14
+getlink drillSurge 15
+getlink drillSpore 16
+
+sensor coreX core @x
+sensor coreY core @y
+
+getlink oreCopper @copper
+getlink oreLead @lead
+getlink oreTitanium @titanium
+getlink oreThorium @thorium
+getlink oreScrap @scrap
+getlink oreSilicon @silicon
+getlink orePhase @phase-fabric
+getlink oreSurge @surge-alloy
+getlink oreSpore @spore-pod
+
+sensor coreCopper core @copper
+sensor coreLead core @lead
+sensor coreTitanium core @titanium
+sensor coreThorium core @thorium
+sensor coreScrap core @scrap
+sensor coreSilicon core @silicon
+sensor corePhase core @phase-fabric
+coreSurge core @surge-alloy
+coreSpore core @spore-pod
+
+sensor drillCount core @drill
+sensor drillCopperCount core @drill-copper
+sensor drillLeadCount core @drill-lead
+sensor drillTitaniumCount core @drill-titanium
+sensor drillThoriumCount core @drill-thorium
+sensor drillScrapCount core @drill-scrap
+sensor drillSiliconCount core @drill-silicon
+sensor drillPhaseCount core @drill-phase-fabric
+sensor drillSurgeCount core @drill-surge-alloy
+sensor drillSporeCount core @drill-spore-pod
+
+set needCopper 0
+set needLead 0
+set needTitanium 0
+set needThorium 0
+set needScrap 0
+needSilicon 0
+set needPhase 0
+set needSurge 0
+set needSpore 0
+
+jump 50 greaterThan coreCopper 0
+set needCopper 1
+jump 50 equal drillCopperCount 0
+
+jump 70 greaterThan coreLead 0
+set needLead 1
+jump 70 equal drillLeadCount 0
+
+jump 90 greaterThan coreTitanium 0
+set needTitanium 1
+jump 90 equal drillTitaniumCount 0
+
+jump 110 greaterThan coreThorium 0
+set needThorium 1
+jump 110 equal drillThoriumCount 0
+
+jump 130 greaterThan coreScrap 0
+set needScrap 1
+jump 130 equal drillScrapCount 0
+
+jump 150 greaterThan coreSilicon 0
+set needSilicon 1
+jump 150 equal drillSiliconCount 0
+
+jump 170 greaterThan corePhase 0
+set needPhase 1
+jump 170 equal drillPhaseCount 0
+
+jump 190 greaterThan coreSurge 0
+set needSurge 1
+jump 190 equal drillSurgeCount 0
+
+jump 210 greaterThan coreSpore 0
+set needSpore 1
+jump 210 equal drillSporeCount 0
+
+jump 230
+
+sensor oreX core @copper
+sensor oreY core @copper
+control builder build @drill-copper oreX oreY 0 coreCopper
+control drillCopper configure @copper
+control drillCopper enabled true
+jump 230 equal needCopper 0
+
+sensor oreX core @lead
+sensor oreY core @lead
+control builder build @drill-lead oreX oreY 0 coreLead
+control drillLead configure @lead
+control drillLead enabled true
+jump 230 equal needLead 0
+
+sensor oreX core @titanium
+sensor oreY core @titanium
+control builder build @drill-titanium oreX oreY 0 coreTitanium
+control drillTitanium configure @titanium
+control drillTitanium enabled true
+jump 230 equal needTitanium 0
+
+sensor oreX core @thorium
+sensor oreY core @thorium
+control builder build @drill-thorium oreX oreY 0 coreThorium
+control drillThorium configure @thorium
+control drillThorium enabled true
+jump 230 equal needThorium 0
+
+sensor oreX core @scrap
+sensor oreY core @scrap
+control builder build @drill-scrap oreX oreY 0 coreScrap
+control drillScrap configure @scrap
+control drillScrap enabled true
+jump 230 equal needScrap 0
+
+sensor oreX core @silicon
+sensor oreY core @silicon
+control builder build @drill-silicon oreX oreY 0 coreSilicon
+control drillSilicon configure @silicon
+control drillSilicon enabled true
+jump 230 equal needSilicon 0
+
+sensor oreX core @phase-fabric
+sensor oreY core @phase-fabric
+control builder build @drill-phase-fabric oreX oreY 0 corePhase
+control drillPhase configure @phase-fabric
+control drillPhase enabled true
+jump 230 equal needPhase 0
+
+sensor oreX core @surge-alloy
+sensor oreY core @surge-alloy
+control builder build @drill-surge-alloy oreX oreY 0 coreSurge
+control drillSurge configure @surge-alloy
+control drillSurge enabled true
+jump 230 equal needSurge 0
+
+sensor oreX core @spore-pod
+sensor oreY core @spore-pod
+control builder build @drill-spore-pod oreX oreY 0 coreSpore
+control drillSpore configure @spore-pod
+control drillSpore enabled true
+
+end
