@@ -71,7 +71,10 @@ public class KryptosHud {
         panel.visible = false;
         panel.pack();
 
-        addToggle(panel, "autoplay", "Autoplay", () -> autoplay, b -> autoplay = b);
+        addToggle(panel, "autoplay", "Autoplay", () -> autoplay, b -> {
+            autoplay = b;
+            KryptosAutomationPanel.setShown(b);
+        });
         addToggle(panel, "health", "Health Bars", () -> healthBars, b -> healthBars = b);
         addToggle(panel, "path", "Pathfinding", () -> pathfinding, b -> pathfinding = b);
         addToggle(panel, "range", "Range Display", () -> rangeDisplay, b -> rangeDisplay = b);
@@ -162,10 +165,21 @@ public class KryptosHud {
     }
 
     private static void addToggle(Table into, String iconName, String tooltipText, Boolp getter, arc.func.Boolc setter) {
+        addToggle(into, safeDrawable(iconName), tooltipText, getter, setter);
+    }
+
+    /**
+     * Same toggle-button widget as {@link #addToggle(Table, String, String, Boolp, arc.func.Boolc)},
+     * but takes an already-resolved {@link Drawable} so callers outside this
+     * class (e.g. {@link KryptosAutomationPanel}) can reuse it with vanilla
+     * content icons (like {@code Blocks.conveyor.uiIcon}) instead of only
+     * mod-bundled sprites.
+     */
+    static void addToggle(Table into, Drawable icon, String tooltipText, Boolp getter, arc.func.Boolc setter) {
         Image[] iconRef = new Image[1];
 
         Button btn = into.button(t -> {
-            iconRef[0] = t.image(safeDrawable(iconName)).size(BTN_SIZE * 0.5f).get();
+            iconRef[0] = t.image(icon).size(BTN_SIZE * 0.5f).get();
         }, Styles.emptyi, () -> setter.get(!getter.get())).size(BTN_SIZE).pad(4f).get();
 
         btn.update(() -> {
@@ -198,4 +212,5 @@ public class KryptosHud {
         panel.clearActions();
         panel.actions(Actions.alpha(0f, 0.24f, Interp.pow3In), Actions.visible(false));
     }
-                    }
+            }
+            

@@ -1,0 +1,97 @@
+getlink drill1 0
+getlink drill2 1
+getlink drill3 2
+getlink drill4 3
+getlink core 4
+
+sensor oreCopper core @copper
+sensor oreLead core @lead
+sensor oreTitanium core @titanium
+sensor oreThorium core @thorium
+sensor oreScrap core @scrap
+sensor oreSilicon core @silicon
+sensor orePhase core @phase-fabric
+sensor oreSurge core @surge-alloy
+sensor oreSpore core @spore-pod
+
+op add totalOre oreCopper oreLead
+op add totalOre totalOre oreTitanium
+op add totalOre totalOre oreThorium
+op add totalOre totalOre oreScrap
+op add totalOre totalOre oreSilicon
+op add totalOre totalOre orePhase
+op add totalOre totalOre oreSurge
+op add totalOre totalOre oreSpore
+
+jump 15 equal totalOre 0
+
+sensor drill1X drill1 @x
+sensor drill1Y drill1 @y
+sensor drill2X drill2 @x
+sensor drill2Y drill2 @y
+sensor drill3X drill3 @x
+sensor drill3Y drill3 @y
+sensor drill4X drill4 @x
+sensor drill4Y drill4 @y
+
+set bestOre 0
+set bestAmount 0
+
+sensor tempOre core @copper
+jump 40 greaterThan tempOre bestAmount
+set bestOre @copper
+set bestAmount tempOre
+
+sensor tempOre core @lead
+jump 40 greaterThan tempOre bestAmount
+set bestOre @lead
+set bestAmount tempOre
+
+sensor tempOre core @titanium
+jump 40 greaterThan tempOre bestAmount
+set bestOre @titanium
+set bestAmount tempOre
+
+sensor tempOre core @thorium
+jump 40 greaterThan tempOre bestAmount
+set bestOre @thorium
+set bestAmount tempOre
+
+sensor tempOre core @scrap
+jump 40 greaterThan tempOe bestAmount
+set bestOre @scrap
+set bestAmount tempOre
+
+sensor tempOre core @silicon
+jump 40 greaterThan tempOre bestAmount
+set bestOre @silicon
+set bestAmount tempOre
+
+sensor tempOre core @phase-fabric
+jump 40 greaterThan tempOre bestAmount
+set bestOre @phase-fabric
+set bestAmount tempOre
+
+sensor tempOre core @surge-alloy
+jump 40 greaterThan tempOre bestAmount
+set bestOre @surge-alloy
+set bestAmount tempOre
+
+sensor tempOre core @spore-pod
+jump 40 greaterThan tempOre bestAmount
+set bestOre @spore-pod
+set bestAmount tempOre
+
+control drill1 configure bestOre
+control drill2 configure bestOre
+control drill3 configure bestOre
+control drill4 configure bestOre
+
+control drill1 enabled true
+control drill2 enabled true
+control drill3 enabled true
+control drill4 enabled true
+
+jump 5
+
+end

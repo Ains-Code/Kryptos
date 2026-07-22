@@ -1,0 +1,214 @@
+getlink core 0
+getlink builder 1
+getlink drillCopper 10
+getlink drillLead 11
+getlink drillTitanium 12
+getlink drillThorium 13
+getlink drillScrap 14
+getlink drillSilicon 15
+getlink drillPhase 16
+getlink drillSurge 17
+getlink drillSpore 18
+getlink switch 20
+
+sensor coreX core @x
+sensor coreY core @y
+
+sensor coreCopper core @copper
+sensor coreLead core @lead
+sensor coreTitanium core @titanium
+sensor coreThorium core @thorium
+sensor coreScrap core @scrap
+sensor coreSilicon core @silicon
+sensor corePhase core @phase-fabric
+sensor coreSurge core @surge-alloy
+sensor coreSpore core @spore-pod
+
+sensor switchState switch @enabled
+
+sensor drillCopperCount core @drill-copper
+sensor drillLeadCount core @drill-lead
+sensor drillTitaniumCount core @drill-titanium
+sensor drillThoriumCount core @drill-thorium
+sensor drillScrapCount core @drill-scrap
+sensor drillSiliconCount core @drill-silicon
+sensor drillPhaseCount core @drill-phase-fabric
+sensor drillSurgeCount core @drill-surge-alloy
+sensor drillSporeCount core @drill-spore-pod
+
+sensor drillCopperEnabled drillCopper @enabled
+sensor drillLeadEnabled drillLead @enabled
+sensor drillTitaniumEnabled drillTitanium @enabled
+sensor drillThoriumEnabled drillThorium @enabled
+sensor drillScrapEnabled drillScrap @enabled
+sensor drillSiliconEnabled drillSilicon @enabled
+sensor drillPhaseEnabled drillPhase @enabled
+sensor drillSurgeEnabled drillSurge @enabled
+sensor drillSporeEnabled drillSpore @enabled
+
+jump 300 equal switchState 0
+
+jump 50 greaterThan coreCopper 0
+jump 50 equal drillCopperCount 0
+jump 50 equal drillCopperEnabled 0
+
+jump 100 greaterThan coreLead 0
+jump 100 equal drillLeadCount 0
+jump 100 equal drillLeadEnabled 0
+
+jump 150 greaterThan coreTitanium 0
+jump 150 equal drillTitaniumCount 0
+jump 150 equal drillTitaniumEnabled 0
+
+jump 200 greaterThan coreThorium 0
+jump 200 equal drillThoriumCount 0
+jump 200 equal drillThoriumEnabled 0
+
+jump 250 greaterThan coreScrap 0
+jump 250 equal drillScrapCount 0
+jump 250 equal drillScrapEnabled 0
+
+jump 300 greaterThan coreSilicon 0
+jump 300 equal drillSiliconCount 0
+jump 300 equal drillSiliconEnabled 0
+
+jump 350 greaterThan corePhase 0
+jump 350 equal drillPhaseCount 0
+jump 350 equal drillPhaseEnabled 0
+
+jump 400 greaterThan coreSurge 0
+jump 400 equal drillSurgeCount 0
+jump 400 equal drillSurgeEnabled 0
+
+jump 450 greaterThan coreSpore 0
+jump 450 equal drillSporeCount 0
+jump 450 equal drillSporeEnabled 0
+
+jump 500
+
+sensor oreX core @copper
+sensor oreY core @copper
+control builder build @drill-copper oreX oreY 0 coreCopper
+control drillCopper configure @copper
+control drillCopper enabled true
+jump 500
+
+sensor oreX core @lead
+sensor oreY core @lead
+control builder build @drill-lead oreX oreY 0 coreLead
+control drillLead configure @lead
+control drillLead enabled true
+jump 500
+
+sensor oreX core @titanium
+sensor oreY core @titanium
+control builder build @drill-titanium oreX oreY 0 coreTitanium
+control drillTitanium configure @titanium
+control drillTitanium enabled true
+jump 500
+
+sensor oreX core @thorium
+sensor oreY core @thorium
+control builder build @drill-thorium oreX oreY 0 coreThorium
+control drillThorium configure @thorium
+control drillThorium enabled true
+jump 500
+
+sensor oreX core @scrap
+sensor oreY core @scrap
+control builder build @drill-scrap oreX oreY 0 coreScrap
+control drillScrap configure @scrap
+control drillScrap enabled true
+jump 500
+
+sensor oreX core @silicon
+sensor oreY core @silicon
+control builder build @drill-silicon oreX oreY 0 coreSilicon
+control drillSilicon configure @silicon
+control drillSilicon enabled true
+jump 500
+
+sensor oreX core @phase-fabric
+sensor oreY core @phase-fabric
+control builder build @drill-phase-fabric oreX oreY 0 corePhase
+control drillPhase configure @phase-fabric
+control drillPhase enabled true
+jump 500
+
+sensor oreX core @surge-alloy
+sensor oreY core @surge-alloy
+control builder build @drill-surge-alloy oreX oreY 0 coreSurge
+control drillSurge configure @surge-alloy
+control drillSurge enabled true
+jump 500
+
+sensor oreX core @spore-pod
+sensor oreY core @spore-pod
+control builder build @drill-spore-pod oreX oreY 0 coreSpore
+control drillSpore configure @spore-pod
+control drillSpore enabled true
+
+jump 600
+
+set targetOre @copper
+set maxOre coreCopper
+
+jump 520 greaterThan coreLead maxOre
+set targetOre @lead
+set maxOre coreLead
+
+jump 520 greaterThan coreTitanium maxOre
+set targetOre @titanium
+set maxOre coreTitanium
+
+jump 520 greaterThan coreThorium maxOre
+set targetOre @thorium
+set maxOre coreThorium
+
+jump 520 greaterThan coreScrap maxOre
+set targetOre @scrap
+set maxOre coreScrap
+
+jump 520 greaterThan coreSilicon maxOre
+set targetOre @silicon
+set maxOre coreSilicon
+
+jump 520 greaterThan corePhase maxOre
+set targetOre @phase-fabric
+set maxOre corePhase
+
+jump 520 greaterThan coreSurge maxOre
+set targetOre @surge-alloy
+set maxOre coreSurge
+
+jump 520 greaterThan coreSpore maxOre
+set targetOre @spore-pod
+set maxOre coreSpore
+
+control drillCopper configure targetOre
+control drillLead configure targetOre
+control drillTitanium configure targetOre
+control drillThorium configure targetOre
+control drillScrap configure targetOre
+control drillSilicon configure targetOre
+control drillPhase configure targetOre
+control drillSurge configure targetOre
+control drillSpore configure targetOre
+
+control drillCopper enabled true
+control drillLead enabled true
+control drillTitanium enabled true
+control drillThorium enabled true
+control drillScrap enabled true
+control drillSilicon enabled true
+control drillPhase enabled true
+control drillSurge enabled true
+control drillSpore enabled true
+
+print "Auto-mine: "
+print targetOre
+print " ("
+print maxOre
+print ")"
+
+end

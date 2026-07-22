@@ -2,7 +2,35 @@ apply plugin: "java"
 
 version '1.0'
 
-sourceSets.main.java.srcDirs = ["src"]
+sourceSets.main.java.srcDirs = ["src", "$buildDir/generated-src"]
+
+// Generates kryptos.KryptosBuildConfig with a real wall-clock timestamp every
+// time the jar is built, so a running mod instance can prove which build it
+// actually loaded (see KryptosBootstrap.init()). Runs before compileJava so
+// the generated file always exists when javac needs it.
+task generateKryptosBuildConfig {
+    def outDir = file("$buildDir/generated-src/kryptos")
+    def outFile = file("$outDir/KryptosBuildConfig.java")
+
+    outputs.upToDateWhen { false } // must regenerate every build, not be cached
+
+    doLast {
+        outDir.mkdirs()
+        def timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+        outFile.text = """package kryptos;
+
+/** Generated at build time by the generateKryptosBuildConfig Gradle task. Do not edit by hand. */
+public final class KryptosBuildConfig {
+    private KryptosBuildConfig() {
+    }
+
+    public static final String BUILD_TIMESTAMP = "${timestamp}";
+}
+"""
+    }
+}
+
+compileJava.dependsOn generateKryptosBuildConfig
 
 repositories{
     mavenCentral()
@@ -35,6 +63,11 @@ repositories{
 java{
     targetCompatibility = JavaVersion.VERSION_17
     sourceCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << "-Xlint:unchecked" << "-Xlint:deprecation"
 }
 
 

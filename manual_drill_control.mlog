@@ -1,0 +1,82 @@
+getlink core 0
+getlink drill1 1
+getlink drill2 2
+getlink drill3 3
+getlink drill4 4
+getlink drill5 5
+getlink drill6 6
+getlink drill7 7
+getlink drill8 8
+
+sensor coreX core @x
+sensor coreY core @y
+
+sensor oreCopper core @copper
+sensor oreLead core @lead
+sensor oreTitanium core @titanium
+sensor oreThorium core @thorium
+sensor oreScrap core @scrap
+sensor oreSilicon core @silicon
+sensor orePhase core @phase-fabric
+sensor oreSurge core @surge-alloy
+sensor oreSpore core @spore-pod
+
+set targetOre @copper
+set maxOre oreCopper
+
+jump 30 greaterThan oreLead maxOre
+set targetOre @lead
+set maxOre oreLead
+
+jump 30 greaterThan oreTitanium maxOre
+set targetOre @titanium
+set maxOre oreTitanium
+
+jump 30 greaterThan oreThorium maxOre
+set targetOre @thorium
+set maxOre oreThorium
+
+jump 30 greaterThan oreScrap maxOe
+set targetOre @scrap
+set maxOre oreScrap
+
+jump 30 greaterThan oreSilicon maxOre
+set targetOre @silicon
+set maxOre oreSilicon
+
+jump 30 greaterThan orePhase maxOre
+set targetOre @phase-fabric
+set maxOre orePhase
+
+jump 30 greaterThan oreSurge maxOre
+set targetOre @surge-alloy
+set maxOre oreSurge
+
+jump 30 greaterThan oreSpore maxOre
+set targetOre @spore-pod
+set maxOre oreSpore
+
+control drill1 configure targetOre
+control drill2 configure targetOre
+control drill3 configure targetOre
+control drill4 configure targetOre
+control drill5 configure targetOre
+control drill6 configure targetOre
+control drill7 configure targetOre
+control drill8 configure targetOre
+
+control drill1 enabled true
+control drill2 enabled true
+control drill3 enabled true
+control drill4 enabled true
+control drill5 enabled true
+control drill6 enabled true
+control drill7 enabled true
+control drill8 enabled true
+
+print "Mining: "
+print targetOre
+print " Amount: "
+print maxOre
+
+end

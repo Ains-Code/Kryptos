@@ -1,7 +1,10 @@
 package kryptos;
 
 import arc.util.Log;
-import kryptos.content.KryptosOreInjector;
+import kryptos.automation.KryptosAutoConveyor;
+import kryptos.automation.KryptosSmartDrill;
+import kryptos.world.KryptosOreGenerator;
+import kryptos.ui.KryptosAutomationPanel;
 import kryptos.ui.KryptosHealthBar;
 import kryptos.ui.KryptosHud;
 import kryptos.ui.KryptosPathIndicator;
@@ -23,6 +26,7 @@ public final class KryptosBootstrap {
         initialized = true;
 
         Log.info("Initializing Kryptos systems...");
+        Log.info("Kryptos build timestamp: @", KryptosBuildConfig.BUILD_TIMESTAMP);
 
         // ===========================
         // UI
@@ -30,6 +34,7 @@ public final class KryptosBootstrap {
 
         KryptosTheme.apply();
         KryptosHud.build();
+        KryptosAutomationPanel.build();
         KryptosPathIndicator.init();
         KryptosHealthBar.init();
         KryptosRangeDisplay.init();
@@ -38,8 +43,10 @@ public final class KryptosBootstrap {
         // ===========================
         // World
         // ===========================
-
-        KryptosOreInjector.init();
+        
+        KryptosOreGenerator.init();
+        KryptosAutoConveyor.init();
+        KryptosSmartDrill.init();
 
         Log.info("Kryptos systems initialized.");
     }
