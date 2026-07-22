@@ -32,22 +32,36 @@ public final class KryptosBootstrap {
         // UI
         // ===========================
 
-        KryptosTheme.apply();
-        KryptosHud.build();
-        KryptosAutomationPanel.build();
-        KryptosPathIndicator.init();
-        KryptosHealthBar.init();
-        KryptosRangeDisplay.init();
-        KryptosTimeControl.init();
+        run("KryptosTheme.apply", KryptosTheme::apply);
+        run("KryptosHud.build", KryptosHud::build);
+        run("KryptosAutomationPanel.build", KryptosAutomationPanel::build);
+        run("KryptosPathIndicator.init", KryptosPathIndicator::init);
+        run("KryptosHealthBar.init", KryptosHealthBar::init);
+        run("KryptosRangeDisplay.init", KryptosRangeDisplay::init);
+        run("KryptosTimeControl.init", KryptosTimeControl::init);
 
         // ===========================
         // World
         // ===========================
-        
-        KryptosOreGenerator.init();
-        KryptosAutoConveyor.init();
-        KryptosSmartDrill.init();
+
+        run("KryptosOreGenerator.init", KryptosOreGenerator::init);
+        run("KryptosAutoConveyor.init", KryptosAutoConveyor::init);
+        run("KryptosSmartDrill.init", KryptosSmartDrill::init);
 
         Log.info("Kryptos systems initialized.");
+    }
+
+    /**
+     * Runs a single subsystem's init/build step in isolation. If it throws,
+     * the failure is logged with its full stack trace and every other
+     * subsystem still gets a chance to load, instead of one bad component
+     * silently taking down the entire mod's UI/world setup.
+     */
+    private static void run(String name, Runnable step) {
+        try {
+            step.run();
+        } catch (Throwable t) {
+            Log.err("[Kryptos] " + name + " failed to initialize:", t);
+        }
     }
 }
