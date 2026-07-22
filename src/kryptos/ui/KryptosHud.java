@@ -93,7 +93,11 @@ public class KryptosHud {
         row.add(panel).padRight(8f);
         row.add(icon).size(ICON_SIZE + 12f);
 
-        KryptosTeamPanel.build();
+        try {
+            KryptosTeamPanel.build();
+        } catch (Throwable t) {
+            Log.err("[Kryptos] KryptosTeamPanel.build failed to initialize:", t);
+        }
 
         container.top();
         container.add(row);
