@@ -578,4 +578,74 @@ public final class KryptosSmartDrill {
     }
 
     private static int rotationFor(int dx, int dy) {
-       
+        for (int dir = 0; dir < 4; dir++) {
+            if (DX4[dir] == dx && DY4[dir] == dy) return dir;
+        }
+        return 0;
+    }
+
+    private static int rotationTowardCore(int x, int y, int coreX, int coreY) {
+        for (int dir = 0; dir < 4; dir++) {
+            int nx = x + DX4[dir];
+            int ny = y + DY4[dir];
+            if (nx == coreX && ny == coreY) return dir;
+        }
+        return 0;
+    }
+
+    private static Item getItemFromOre(OreBlock ore) {
+        if (ore == Blocks.oreCopper) return Items.copper;
+        if (ore == Blocks.oreLead) return Items.lead;
+        if (ore == Blocks.oreCoal) return Items.coal;
+        if (ore == Blocks.oreTitanium) return Items.titanium;
+        if (ore == Blocks.oreThorium) return Items.thorium;
+        if (ore == Blocks.oreScrap) return Items.scrap;
+        if (ore == KryptosBlocks.oreCustom) return KryptosItems.customOre;
+        return null;
+    }
+
+    private static class OreDeposit {
+        final int key;
+        final IntSeq cluster;
+        final Item item;
+        final int centerX, centerY;
+        final int coreDist;
+
+        OreDeposit(int key, IntSeq cluster, Item item, int cx, int cy, int dist) {
+            this.key = key;
+            this.cluster = cluster;
+            this.item = item;
+            this.centerX = cx;
+            this.centerY = cy;
+            this.coreDist = dist;
+        }
+    }
+
+    private static class DrillPlan {
+        final int drillX, drillY;
+        final int conveyorX, conveyorY;
+        final Drill drillType;
+        final Item item;
+        final IntSeq path;
+        final int depositKey;
+        final int coveredOre;
+
+        DrillPlan(int dx, int dy, int cx, int cy, Drill drill, Item item, IntSeq path, int key) {
+            this.drillX = dx;
+            this.drillY = dy;
+            this.conveyorX = cx;
+            this.conveyorY = cy;
+            this.drillType = drill;
+            this.item = item;
+            this.path = path;
+            this.depositKey = key;
+            this.coveredOre = countOreCovered(dx, dy, drill.size, item);
+        }
+    }
+
+    private static class Node {
+        final int idx;
+        final float f;
+        Node(int idx, float f) { this.idx = idx; this.f = f; }
+    }
+}
