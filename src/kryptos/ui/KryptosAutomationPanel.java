@@ -10,6 +10,7 @@ import arc.scene.event.Touchable;
 import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.Label;
 import arc.scene.ui.layout.Table;
+import kryptos.automation.KryptosAutoSmartDrill;
 import kryptos.automation.KryptosAutoConveyor;
 import mindustry.content.Blocks;
 import mindustry.ui.Styles;
