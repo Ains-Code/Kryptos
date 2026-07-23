@@ -339,6 +339,10 @@ public final class KryptosAutoConveyor {
     }
 
     private static IntSeq findPathAStar(int startX, int startY, Building core, int w, int h) {
+        return findPathAStar(startX, startY, core, w, h, true);
+    }
+
+    private static IntSeq findPathAStar(int startX, int startY, Building core, int w, int h, boolean allowBridge) {
         int startIdx = startY * w + startX;
         int coreX = core.tile.x;
         int coreY = core.tile.y;
@@ -398,7 +402,7 @@ public final class KryptosAutoConveyor {
         }
 
         if (goalIdx == -1) {
-            return tryBridgePath(startX, startY, core, w, h);
+            return allowBridge ? tryBridgePath(startX, startY, core, w, h) : null;
         }
 
         return reconstructPath(prev, goalIdx, w);
@@ -415,7 +419,7 @@ public final class KryptosAutoConveyor {
                 if (bx < 0 || by < 0 || bx >= w || by >= h) break;
 
                 if (isConveyorWalkable(world.tile(bx, by))) {
-                    IntSeq path = findPathAStar(bx, by, core, w, h);
+                    IntSeq path = findPathAStar(bx, by, core, w, h, false);
                     if (path != null && path.size > 0) {
                         IntSeq bridgePath = new IntSeq();
                         for (int l = 1; l <= len; l++) {
@@ -575,4 +579,4 @@ public final class KryptosAutoConveyor {
         final float f;
         Node(int idx, float f) { this.idx = idx; this.f = f; }
     }
-                                                                     }
+}
