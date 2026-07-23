@@ -31,7 +31,6 @@ import mindustry.world.blocks.distribution.Router;
 import mindustry.world.blocks.distribution.MassDriver;
 
 import java.util.ArrayDeque;
-import java.util.Comparator;
 import java.util.PriorityQueue;
 import java.util.Arrays;
 
@@ -252,8 +251,11 @@ public final class KryptosAutoConveyor {
 
         if (candidates.isEmpty()) return null;
 
-        candidates.sort(Comparator.<DrillPlacement>comparingInt(p -> -p.covered)
-            .thenComparingInt(p -> p.coreDist));
+        candidates.sort((a, b) -> {
+            int byCovered = Integer.compare(b.covered, a.covered);
+            if (byCovered != 0) return byCovered;
+            return Integer.compare(a.coreDist, b.coreDist);
+        });
 
         return candidates.first();
     }
@@ -360,7 +362,7 @@ public final class KryptosAutoConveyor {
         Arrays.fill(fScore, Float.MAX_VALUE);
         Arrays.fill(prev, -1);
 
-        PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
+        PriorityQueue<Node> open = new PriorityQueue<>((a, b) -> Float.compare(a.f, b.f));
         gScore[startIdx] = 0;
         fScore[startIdx] = heuristic(startX, startY, coreX, coreY);
         open.add(new Node(startIdx, fScore[startIdx]));
@@ -567,7 +569,7 @@ public final class KryptosAutoConveyor {
         final int covered;
         final int coreDist;
         final Drill drill;
-       
+
         DrillPlacement(int dx, int dy, int cx, int cy, int covered, int dist, Drill drill) {
             this.drillX = dx;
             this.drillY = dy;
@@ -584,4 +586,4 @@ public final class KryptosAutoConveyor {
         final float f;
         Node(int idx, float f) { this.idx = idx; this.f = f; }
     }
-    }
+}
