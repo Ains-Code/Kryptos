@@ -13,6 +13,7 @@ import arc.scene.ui.layout.Table;
 import kryptos.automation.KryptosAutoConveyor;
 import kryptos.automation.KryptosLogicDeploy;
 import kryptos.automation.KryptosSmartDrill;
+import kryptos.content.KryptosUnits;
 import mindustry.content.Blocks;
 import mindustry.content.Items;
 import mindustry.ui.Styles;
@@ -47,6 +48,15 @@ public class KryptosAutomationPanel {
     /** Master switch for the smart drill module; read by {@link KryptosSmartDrill}. */
     public static boolean autoSmartDrill = false;
 
+    /**
+     * Off (default): helper drones are locked to {@link kryptos.automation.KryptosDroneAI}
+     * and can't be selected/commanded by the player -- pure automation.
+     * On: player can select the drones via the RTS Command panel and drive
+     * them manually like any other unit. See the toggle wiring below and
+     * {@link kryptos.automation.KryptosBuilderUnits#getOrSpawn}.
+     */
+    public static boolean manualDroneControl = false;
+
     private static Table container;
     private static Table content;
     private static Label statusLabel;
@@ -68,6 +78,15 @@ public class KryptosAutomationPanel {
                 "Smart Drill", () -> autoSmartDrill, b -> {
                     autoSmartDrill = b;
                     if (b) KryptosSmartDrill.requestImmediateScan();
+                });
+        content.row();
+
+        // Off: drones are locked to our own AI, un-selectable, pure automation.
+        // On: player can select and command them manually via the RTS panel.
+        KryptosHud.addToggle(content, new TextureRegionDrawable(KryptosUnits.builder.uiIcon),
+                "Manual Drone Control", () -> manualDroneControl, b -> {
+                    manualDroneControl = b;
+                    KryptosUnits.builder.playerControllable = b;
                 });
         content.row();
 
