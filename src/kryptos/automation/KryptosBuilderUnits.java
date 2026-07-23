@@ -2,7 +2,6 @@ package kryptos.automation;
 
 import arc.math.Mathf;
 import kryptos.content.KryptosUnits;
-import kryptos.ui.KryptosAutomationPanel;
 import mindustry.game.Team;
 import mindustry.gen.Building;
 import mindustry.gen.Unit;
@@ -14,6 +13,10 @@ import mindustry.gen.Unit;
  * as long as it's alive, and quietly replaced if it dies. Both modules keep
  * their own separate drone (they call this independently), so turning both
  * toggles on gives you 2 drones total, matching one-drone-per-toggle.
+ *
+ * Automation only -- the drone is always locked to {@link KryptosDroneAI}
+ * and is never player-controllable (see {@code playerControllable = false}
+ * on {@link KryptosUnits#builder}).
  */
 public final class KryptosBuilderUnits {
 
@@ -32,9 +35,7 @@ public final class KryptosBuilderUnits {
             // loaded from an existing save) and are still stuck on the stock
             // BuilderAI or some other controller -- force our controller
             // back on instead of leaving them to their old behavior.
-            // Skipped while Manual Drone Control is on, since that's the
-            // player deliberately taking the wheel.
-            if (!KryptosAutomationPanel.manualDroneControl && !(current.controller() instanceof KryptosDroneAI)) {
+            if (!(current.controller() instanceof KryptosDroneAI)) {
                 current.controller(new KryptosDroneAI());
             }
             return current;
@@ -46,14 +47,10 @@ public final class KryptosBuilderUnits {
         Unit unit = KryptosUnits.builder.create(team);
         unit.set(core.x + Mathf.range(SPAWN_JITTER), core.y + Mathf.range(SPAWN_JITTER));
         unit.rotation = 90f;
-        // Force our own controller instead of whatever create() assigned by
-        // default -- unless Manual Drone Control is on, in which case leave
-        // it as the player-controllable CommandAI create() already set up.
-        if (!KryptosAutomationPanel.manualDroneControl) {
-            unit.controller(new KryptosDroneAI());
-        }
+        // Force our own controller instead of the stock BuilderAI that
+        // create() would otherwise assign -- see KryptosDroneAI for why.
+        unit.controller(new KryptosDroneAI());
         unit.add();
         return unit;
     }
-}
-
+            }
