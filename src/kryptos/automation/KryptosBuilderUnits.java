@@ -36,6 +36,9 @@ public final class KryptosBuilderUnits {
         Unit unit = KryptosUnits.builder.create(team);
         unit.set(core.x + Mathf.range(SPAWN_JITTER), core.y + Mathf.range(SPAWN_JITTER));
         unit.rotation = 90f;
+        // Force our own controller instead of the stock BuilderAI that
+        // create() would otherwise assign -- see KryptosDroneAI for why.
+        unit.controller(new KryptosDroneAI());
         unit.add();
         return unit;
     }
