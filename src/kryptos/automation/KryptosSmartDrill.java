@@ -42,6 +42,7 @@ public final class KryptosSmartDrill {
 
     private static final float SCAN_INTERVAL_TICKS = 60f * 5f;
     private static final int MAX_DRILLS_PER_CYCLE = 4;
+    private static final int MAX_PATH_ATTEMPTS_PER_CYCLE = 8;
     private static final int MAX_PATH_SEARCH_TILES = 15000;
     private static final int MAX_PATH_LENGTH = 180;
 
@@ -142,19 +143,28 @@ public final class KryptosSmartDrill {
                     depositsByItem.put(item, list);
                 }
                 list.add(deposit);
-                oreClusterKey.put(key, 1);
+                // Note: not marking oreClusterKey here anymore -- only deposits actually
+                // attempted below (within the per-cycle cap) get marked, so any deposit
+                // skipped this cycle due to the cap is retried on the next scan instead
+                // of being permanently ignored.
             }
         }
 
         Seq<DrillPlan> plans = new Seq<>();
+        int attemptsThisCycle = 0;
 
+        outerItems:
         for (Item item : depositsByItem.keys()) {
             Seq<OreDeposit> deposits = depositsByItem.get(item);
             deposits.sort((a, b) -> Integer.compare(a.coreDist, b.coreDist));
 
             int drillsToBuild = Math.min(MAX_DRILLS_PER_CYCLE, deposits.size);
             for (int i = 0; i < drillsToBuild; i++) {
+                if (attemptsThisCycle >= MAX_PATH_ATTEMPTS_PER_CYCLE) break outerItems;
+                attemptsThisCycle++;
+
                 OreDeposit dep = deposits.get(i);
+                oreClusterKey.put(dep.key, 1);
                 DrillPlan plan = createDrillPlan(dep, coreX, coreY);
                 if (plan != null) plans.add(plan);
             }
@@ -568,74 +578,4 @@ public final class KryptosSmartDrill {
     }
 
     private static int rotationFor(int dx, int dy) {
-        for (int dir = 0; dir < 4; dir++) {
-            if (DX4[dir] == dx && DY4[dir] == dy) return dir;
-        }
-        return 0;
-    }
-
-    private static int rotationTowardCore(int x, int y, int coreX, int coreY) {
-        for (int dir = 0; dir < 4; dir++) {
-            int nx = x + DX4[dir];
-            int ny = y + DY4[dir];
-            if (nx == coreX && ny == coreY) return dir;
-        }
-        return 0;
-    }
-
-    private static Item getItemFromOre(OreBlock ore) {
-        if (ore == Blocks.oreCopper) return Items.copper;
-        if (ore == Blocks.oreLead) return Items.lead;
-        if (ore == Blocks.oreCoal) return Items.coal;
-        if (ore == Blocks.oreTitanium) return Items.titanium;
-        if (ore == Blocks.oreThorium) return Items.thorium;
-        if (ore == Blocks.oreScrap) return Items.scrap;
-        if (ore == KryptosBlocks.oreCustom) return KryptosItems.customOre;
-        return null;
-    }
-
-    private static class OreDeposit {
-        final int key;
-        final IntSeq cluster;
-        final Item item;
-        final int centerX, centerY;
-        final int coreDist;
-
-        OreDeposit(int key, IntSeq cluster, Item item, int cx, int cy, int dist) {
-            this.key = key;
-            this.cluster = cluster;
-            this.item = item;
-            this.centerX = cx;
-            this.centerY = cy;
-            this.coreDist = dist;
-        }
-    }
-
-    private static class DrillPlan {
-        final int drillX, drillY;
-        final int conveyorX, conveyorY;
-        final Drill drillType;
-        final Item item;
-        final IntSeq path;
-        final int depositKey;
-        final int coveredOre;
-
-        DrillPlan(int dx, int dy, int cx, int cy, Drill drill, Item item, IntSeq path, int key) {
-            this.drillX = dx;
-            this.drillY = dy;
-            this.conveyorX = cx;
-            this.conveyorY = cy;
-            this.drillType = drill;
-            this.item = item;
-            this.path = path;
-            this.depositKey = key;
-            this.coveredOre = countOreCovered(dx, dy, drill.size, item);
-        }
-    }
-
-    private static class Node {
-        final int idx;
-        final float f;
-        Node(int idx, float f) { this.idx = idx; this.f = f; }
-    }
-}
+       
