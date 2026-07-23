@@ -574,7 +574,9 @@ public final class KryptosAutoConveyor {
         final int covered;
         final int coreDist;
         final Drill drill;
-
+        }
+    }
+       
         DrillPlacement(int dx, int dy, int cx, int cy, int covered, int dist, Drill drill) {
             this.drillX = dx;
             this.drillY = dy;
