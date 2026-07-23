@@ -41,6 +41,7 @@ public final class KryptosAutoConveyor {
 
     private static final float SCAN_INTERVAL_TICKS = 60f * 10f;
     private static final int MAX_DEPOSITS_PER_CYCLE = 3;
+    private static final int MAX_PATH_ATTEMPTS_PER_CYCLE = 8;
     private static final int MIN_CLUSTER_TILES = 2;
     private static final int MAX_PATH_SEARCH_TILES = 20000;
     private static final int MAX_PATH_LENGTH = 220;
@@ -106,11 +107,13 @@ public final class KryptosAutoConveyor {
         int coreY = core.tile.y;
 
         int queuedThisCycle = 0;
+        int attemptsThisCycle = 0;
 
         outer:
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 if (queuedThisCycle >= MAX_DEPOSITS_PER_CYCLE) break outer;
+                if (attemptsThisCycle >= MAX_PATH_ATTEMPTS_PER_CYCLE) break outer;
 
                 int idx = y * w + x;
                 if (seenTiles[idx]) continue;
@@ -140,6 +143,7 @@ public final class KryptosAutoConveyor {
                     continue;
                 }
 
+                attemptsThisCycle++;
                 IntSeq path = findPathAStar(placement.conveyorX, placement.conveyorY, core, w, h);
                 if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) {
                     servedDeposits.add(key);
@@ -571,4 +575,4 @@ public final class KryptosAutoConveyor {
         final float f;
         Node(int idx, float f) { this.idx = idx; this.f = f; }
     }
-}
+                                                                     }
