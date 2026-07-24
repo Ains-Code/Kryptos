@@ -23,7 +23,6 @@ import mindustry.gen.Groups;
 import mindustry.gen.Unit;
 import mindustry.type.Item;
 import mindustry.type.ItemStack;
-import mindustry.gen.CoreBuild;
 import mindustry.world.Block;
 import mindustry.world.Tile;
 import mindustry.world.blocks.production.Drill;
@@ -353,7 +352,7 @@ public final class KryptosSmartDrill {
         // Mechanical Drill) if nothing pricier is affordable yet.
         candidates.sort((a, b) -> Integer.compare(b.tier, a.tier));
 
-        CoreBuild core = Vars.player.team().core();
+        Building core = Vars.player.team().core();
         if (core != null) {
             for (Drill drill : candidates) {
                 if (canAfford(core, drill)) return drill;
@@ -363,7 +362,7 @@ public final class KryptosSmartDrill {
         return candidates.peek();
     }
 
-    private static boolean canAfford(CoreBuild core, Block block) {
+    private static boolean canAfford(Building core, Block block) {
         for (ItemStack stack : block.requirements) {
             if (core.items.get(stack.item) < stack.amount) return false;
         }
