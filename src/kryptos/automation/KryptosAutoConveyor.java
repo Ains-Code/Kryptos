@@ -134,15 +134,18 @@ public final class KryptosAutoConveyor {
         int coreX = core.tile.x;
         int coreY = core.tile.y;
 
-        int queuedThisCycle = 0;
-        int attemptsThisCycle = 0;
+        // Collect every unclaimed deposit first instead of acting on them
+        // as we hit them in the raster scan -- scan order finds whatever's
+        // nearest the top-left of the map first, which can be on the
+        // opposite side of the map from the core. Sorting by distance
+        // afterward means the drone works outward from the core instead of
+        // jumping between far-flung deposits in scan order (this was the
+        // "AutoConveyor drone moves but looks random" bug -- it wasn't
+        // random, it was queuing deposits 100+ tiles apart back to back).
+        Seq<PendingDeposit> deposits = new Seq<>();
 
-        outer:
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                if (queuedThisCycle >= MAX_DEPOSITS_PER_CYCLE) break outer;
-                if (attemptsThisCycle >= MAX_PATH_ATTEMPTS_PER_CYCLE) break outer;
-
                 int idx = y * w + x;
                 if (seenTiles[idx]) continue;
 
@@ -165,22 +168,49 @@ public final class KryptosAutoConveyor {
                 int key = clusterKey(cluster);
                 if (KryptosOreRegistry.isClaimed(key)) continue;
 
-                DrillPlacement placement = findBestDrillPlacement(cluster, ore, coreX, coreY);
-                if (placement == null) {
-                    KryptosOreRegistry.claim(key);
-                    continue;
-                }
-
-                attemptsThisCycle++;
-                IntSeq path = findPathAStar(placement.conveyorX, placement.conveyorY, core, w, h);
-                if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) {
-                    KryptosOreRegistry.claim(key);
-                    continue;
-                }
-
-                serveDeposit(cluster, key, placement, path, core, ore);
-                queuedThisCycle++;
+                int dist = Math.abs(x - coreX) + Math.abs(y - coreY);
+                deposits.add(new PendingDeposit(cluster, key, ore, dist));
             }
+        }
+
+        deposits.sort((a, b) -> Integer.compare(a.coreDist, b.coreDist));
+
+        int queuedThisCycle = 0;
+        int attemptsThisCycle = 0;
+
+        for (PendingDeposit dep : deposits) {
+            if (queuedThisCycle >= MAX_DEPOSITS_PER_CYCLE) break;
+            if (attemptsThisCycle >= MAX_PATH_ATTEMPTS_PER_CYCLE) break;
+
+            DrillPlacement placement = findBestDrillPlacement(dep.cluster, dep.ore, coreX, coreY);
+            if (placement == null) {
+                KryptosOreRegistry.claim(dep.key);
+                continue;
+            }
+
+            attemptsThisCycle++;
+            IntSeq path = findPathAStar(placement.conveyorX, placement.conveyorY, core, w, h);
+            if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) {
+                KryptosOreRegistry.claim(dep.key);
+                continue;
+            }
+
+            serveDeposit(dep.cluster, dep.key, placement, path, core, dep.ore);
+            queuedThisCycle++;
+        }
+    }
+
+    private static class PendingDeposit {
+        final IntSeq cluster;
+        final int key;
+        final OreBlock ore;
+        final int coreDist;
+
+        PendingDeposit(IntSeq cluster, int key, OreBlock ore, int coreDist) {
+            this.cluster = cluster;
+            this.key = key;
+            this.ore = ore;
+            this.coreDist = coreDist;
         }
     }
 
@@ -566,8 +596,8 @@ public final class KryptosAutoConveyor {
             unit.addBuild(plan);
         }
 
-        Log.info("[Kryptos] AutoConveyor: queued @ drill + @ belts from @,@ ore to core.",
-                plans.size, path.size, placement.drillX, placement.drillY);
+        Log.info("[Kryptos] AutoConveyor: queued @ total build steps (1 drill + belts) from @,@ ore to core.",
+                plans.size, placement.drillX, placement.drillY);
     }
 
     private static Block selectConveyorType(int index, int pathLength, Tile tile) {
