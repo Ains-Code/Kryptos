@@ -206,7 +206,7 @@ public final class KryptosSmartDrill {
 
                 OreDeposit dep = deposits.get(i);
                 KryptosOreRegistry.claim(dep.key);
-                DrillPlan plan = createDrillPlan(dep, coreX, coreY);
+                DrillPlan plan = createDrillPlan(dep, core);
                 if (plan != null) plans.add(plan);
             }
         }
@@ -269,7 +269,10 @@ public final class KryptosSmartDrill {
         return min;
     }
 
-    private static DrillPlan createDrillPlan(OreDeposit deposit, int coreX, int coreY) {
+    private static DrillPlan createDrillPlan(OreDeposit deposit, Building core) {
+        int coreX = core.tile.x;
+        int coreY = core.tile.y;
+
         Drill bestDrill = findBestDrillForItem(deposit.item);
         if (bestDrill == null) return null;
 
@@ -309,7 +312,7 @@ public final class KryptosSmartDrill {
 
         if (bestDrillX == -1) return null;
 
-        IntSeq path = findPathAStar(bestConveyorX, bestConveyorY, coreX, coreY);
+        IntSeq path = findPathAStar(bestConveyorX, bestConveyorY, core);
         if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) return null;
 
         return new DrillPlan(
@@ -415,9 +418,11 @@ public final class KryptosSmartDrill {
         return best;
     }
 
-    private static IntSeq findPathAStar(int startX, int startY, int coreX, int coreY) {
+    private static IntSeq findPathAStar(int startX, int startY, Building core) {
         int w = world.width();
         int h = world.height();
+        int coreX = core.tile.x;
+        int coreY = core.tile.y;
         int startIdx = startY * w + startX;
 
         boolean[] closed = new boolean[w * h];
@@ -449,7 +454,7 @@ public final class KryptosSmartDrill {
             int x = idx % w;
             int y = idx / w;
 
-            if (touchesCore(x, y, coreX, coreY)) {
+            if (touchesCore(x, y, core)) {
                 goalIdx = idx;
                 break;
             }
@@ -522,11 +527,10 @@ public final class KryptosSmartDrill {
             || b instanceof Router;
     }
 
-    private static boolean touchesCore(int x, int y, int coreX, int coreY) {
+    private static boolean touchesCore(int x, int y, Building core) {
         for (int dir = 0; dir < 4; dir++) {
-            int nx = x + DX4[dir];
-            int ny = y + DY4[dir];
-            if (nx == coreX && ny == coreY) return true;
+            Tile n = world.tile(x + DX4[dir], y + DY4[dir]);
+            if (n != null && n.build == core) return true;
         }
         return false;
     }
