@@ -2,9 +2,8 @@ package kryptos.automation;
 
 import arc.Events;
 import arc.math.geom.Point2;
-import arc.struct.IntIntMap;
 import arc.struct.IntSeq;
-import arc.struct.ObjectMap;
+import arc.struct.IntSet;
 import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
@@ -13,19 +12,16 @@ import kryptos.ui.KryptosHud;
 import mindustry.Vars;
 import mindustry.content.Blocks;
 import mindustry.content.Items;
-import kryptos.content.KryptosBlocks;
-import kryptos.content.KryptosItems;
 import mindustry.entities.units.BuildPlan;
 import mindustry.game.EventType.Trigger;
 import mindustry.game.EventType.WorldLoadEvent;
 import mindustry.game.Team;
 import mindustry.gen.Building;
+import mindustry.gen.Groups;
 import mindustry.gen.Unit;
-import mindustry.type.Item;
 import mindustry.world.Block;
 import mindustry.world.Tile;
 import mindustry.world.blocks.production.Drill;
-import mindustry.world.blocks.environment.OreBlock;
 import mindustry.world.blocks.distribution.Conveyor;
 import mindustry.world.blocks.distribution.Junction;
 import mindustry.world.blocks.distribution.Router;
@@ -37,28 +33,38 @@ import java.util.Arrays;
 
 import static mindustry.Vars.world;
 
+/**
+ * AutoConveyor's job: keep every drill connected to the core with belts.
+ *
+ * It does NOT place new drills anymore -- that's KryptosSmartDrill's job
+ * exclusively now. This module only looks at drills that already exist
+ * (built by Smart Drill, or by hand) and, for any that don't have a belt
+ * path running out to the core yet, builds just the missing conveyor run.
+ * Division of labor: Smart Drill claims fresh ore and builds drill+belts
+ * together; AutoConveyor mops up afterward and adds/repairs conveyor runs
+ * wherever a drill is still sitting unserved.
+ */
 public final class KryptosAutoConveyor {
 
     private static final float SCAN_INTERVAL_TICKS = 60f * 10f;
-    private static final int MAX_DEPOSITS_PER_CYCLE = 3;
+    private static final int MAX_DRILLS_PER_CYCLE = 3;
     private static final int MAX_PATH_ATTEMPTS_PER_CYCLE = 8;
-    private static final int MIN_CLUSTER_TILES = 2;
     private static final int MAX_PATH_SEARCH_TILES = 20000;
     private static final int MAX_PATH_LENGTH = 220;
     private static final int MAX_BRIDGE_LENGTH = 11;
-    private static final int BRIDGE_SEARCH_RANGE = 15;
-    private static final float DRILL_COVERAGE_RADIUS = 1.5f;
 
     private static final int[] DX4 = {1, 0, -1, 0};
     private static final int[] DY4 = {0, 1, 0, -1};
-    private static final int[] DX8 = {1, 1, 0, -1, -1, -1, 0, 1};
-    private static final int[] DY8 = {0, 1, 1, 1, 0, -1, -1, -1};
-
-    private static boolean[] visited;
-    private static int visitedW, visitedH;
 
     private static float lastScanTime = -SCAN_INTERVAL_TICKS;
-    private static final IntIntMap depositCoreDist = new IntIntMap();
+
+    // Drills we've already handled (either successfully connected, or tried
+    // and failed to find a route for) -- keyed by the drill's tile position,
+    // separate from KryptosOreRegistry (that one tracks claimed ORE
+    // clusters for Smart Drill; this tracks served DRILL buildings, a
+    // different concept, so they're kept in their own set to avoid any key
+    // collision between the two).
+    private static final IntSet servedDrills = new IntSet();
 
     // The drone that actually flies out and builds -- spawned the moment
     // Auto Conveyor is switched on (see requestImmediateScan()), reused for
@@ -83,13 +89,12 @@ public final class KryptosAutoConveyor {
     }
 
     public static int servedCount() {
-        return KryptosOreRegistry.size();
+        return servedDrills.size;
     }
 
     private static void reset() {
-        visited = null;
-        depositCoreDist.clear();
         lastScanTime = -SCAN_INTERVAL_TICKS;
+        servedDrills.clear();
         helperUnit = null;
         // Kills any drone left over from a previous session/save that our
         // static reference above doesn't know about -- see
@@ -128,267 +133,61 @@ public final class KryptosAutoConveyor {
         Building core = team.core();
         if (core == null) return;
 
-        boolean[] seenTiles = ensureVisitedBuffer();
         int w = world.width();
         int h = world.height();
         int coreX = core.tile.x;
         int coreY = core.tile.y;
 
-        // Collect every unclaimed deposit first instead of acting on them
-        // as we hit them in the raster scan -- scan order finds whatever's
-        // nearest the top-left of the map first, which can be on the
-        // opposite side of the map from the core. Sorting by distance
-        // afterward means the drone works outward from the core instead of
-        // jumping between far-flung deposits in scan order (this was the
-        // "AutoConveyor drone moves but looks random" bug -- it wasn't
-        // random, it was queuing deposits 100+ tiles apart back to back).
-        Seq<PendingDeposit> deposits = new Seq<>();
+        // Collect every not-yet-served drill first and sort by distance to
+        // core, same reasoning as before: working outward from the core
+        // instead of jumping between far-flung drills in whatever order
+        // Groups.build happens to iterate them.
+        Seq<Building> candidates = new Seq<>();
 
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int idx = y * w + x;
-                if (seenTiles[idx]) continue;
+        Groups.build.each(b -> {
+            if (b.team != team) return;
+            if (!(b.block instanceof Drill)) return;
+            if (servedDrills.contains(Point2.pack(b.tile.x, b.tile.y))) return;
+            candidates.add(b);
+        });
 
-                Tile tile = world.tile(x, y);
-                if (tile == null) {
-                    seenTiles[idx] = true;
-                    continue;
-                }
-
-                Block overlay = tile.overlay();
-                if (!(overlay instanceof OreBlock)) {
-                    seenTiles[idx] = true;
-                    continue;
-                }
-
-                OreBlock ore = (OreBlock) overlay;
-                IntSeq cluster = floodFillCluster(tile, ore, seenTiles, w, h);
-                if (cluster.size < MIN_CLUSTER_TILES) continue;
-
-                int key = clusterKey(cluster);
-                if (KryptosOreRegistry.isClaimed(key)) continue;
-
-                int dist = Math.abs(x - coreX) + Math.abs(y - coreY);
-                deposits.add(new PendingDeposit(cluster, key, ore, dist));
-            }
-        }
-
-        deposits.sort((a, b) -> Integer.compare(a.coreDist, b.coreDist));
+        candidates.sort((a, b) -> Integer.compare(distToCore(a, coreX, coreY), distToCore(b, coreX, coreY)));
 
         int queuedThisCycle = 0;
         int attemptsThisCycle = 0;
 
-        for (PendingDeposit dep : deposits) {
-            if (queuedThisCycle >= MAX_DEPOSITS_PER_CYCLE) break;
+        for (Building drill : candidates) {
+            if (queuedThisCycle >= MAX_DRILLS_PER_CYCLE) break;
             if (attemptsThisCycle >= MAX_PATH_ATTEMPTS_PER_CYCLE) break;
 
-            DrillPlacement placement = findBestDrillPlacement(dep.cluster, dep.ore, coreX, coreY);
-            if (placement == null) {
-                KryptosOreRegistry.claim(dep.key);
+            int key = Point2.pack(drill.tile.x, drill.tile.y);
+
+            Tile startTile = findBestConveyorTile(drill.tile.x, drill.tile.y, drill.block.size, coreX, coreY);
+            if (startTile == null) {
+                servedDrills.add(key);
+                continue;
+            }
+
+            if (startTile.block() instanceof Conveyor) {
+                // Already has a belt leading out of it -- consider it served.
+                servedDrills.add(key);
                 continue;
             }
 
             attemptsThisCycle++;
-            IntSeq path = findPathAStar(placement.conveyorX, placement.conveyorY, core, w, h);
+            IntSeq path = findPathAStar(startTile.x, startTile.y, core, w, h);
             if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) {
-                KryptosOreRegistry.claim(dep.key);
+                servedDrills.add(key);
                 continue;
             }
 
-            serveDeposit(dep.cluster, dep.key, placement, path, core, dep.ore);
+            serveDrillPath(drill, key, path, core);
             queuedThisCycle++;
         }
     }
 
-    private static class PendingDeposit {
-        final IntSeq cluster;
-        final int key;
-        final OreBlock ore;
-        final int coreDist;
-
-        PendingDeposit(IntSeq cluster, int key, OreBlock ore, int coreDist) {
-            this.cluster = cluster;
-            this.key = key;
-            this.ore = ore;
-            this.coreDist = coreDist;
-        }
-    }
-
-    private static boolean[] ensureVisitedBuffer() {
-        int w = world.width();
-        int h = world.height();
-        if (visited == null || visitedW != w || visitedH != h) {
-            visited = new boolean[w * h];
-            visitedW = w;
-            visitedH = h;
-        }
-        return visited;
-    }
-
-    private static IntSeq floodFillCluster(Tile start, Block overlay, boolean[] seenTiles, int w, int h) {
-        IntSeq cluster = new IntSeq();
-        ArrayDeque<Integer> queue = new ArrayDeque<>();
-
-        queue.add(start.pos());
-        seenTiles[start.y * w + start.x] = true;
-
-        while (!queue.isEmpty()) {
-            int packed = queue.poll();
-            int x = Point2.x(packed);
-            int y = Point2.y(packed);
-            cluster.add(packed);
-
-            for (int dir = 0; dir < 4; dir++) {
-                int nx = x + DX4[dir];
-                int ny = y + DY4[dir];
-                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-
-                int nIdx = ny * w + nx;
-                if (seenTiles[nIdx]) continue;
-
-                Tile neighbor = world.tile(nx, ny);
-                if (neighbor == null || neighbor.overlay() != overlay) {
-                    seenTiles[nIdx] = true;
-                    continue;
-                }
-
-                seenTiles[nIdx] = true;
-                queue.add(neighbor.pos());
-            }
-        }
-
-        return cluster;
-    }
-
-    private static int clusterKey(IntSeq cluster) {
-        int min = Integer.MAX_VALUE;
-        for (int i = 0; i < cluster.size; i++) {
-            min = Math.min(min, cluster.items[i]);
-        }
-        return min;
-    }
-
-    private static DrillPlacement findBestDrillPlacement(IntSeq cluster, OreBlock ore, int coreX, int coreY) {
-        Drill bestDrill = findBestDrillForOre(ore);
-        if (bestDrill == null) return null;
-
-        int drillSize = bestDrill.size;
-        int drillRadius = drillSize / 2;
-        int coverage = bestDrill.drillTime > 0 ? (int) Math.ceil(DRILL_COVERAGE_RADIUS * drillSize) : drillSize;
-
-        Seq<DrillPlacement> candidates = new Seq<>();
-
-        for (int i = 0; i < cluster.size; i++) {
-            int cx = Point2.x(cluster.items[i]);
-            int cy = Point2.y(cluster.items[i]);
-
-            for (int dx = -drillRadius; dx <= drillRadius; dx++) {
-                for (int dy = -drillRadius; dy <= drillRadius; dy++) {
-                    int dx_ = cx + dx;
-                    int dy_ = cy + dy;
-
-                    if (dx_ < 0 || dy_ < 0 || dx_ >= world.width() || dy_ >= world.height()) continue;
-
-                    if (canPlaceDrill(dx_, dy_, drillSize, ore)) {
-                        int covered = countOreCovered(dx_, dy_, drillSize, coverage, ore);
-                        if (covered > 0) {
-                            Tile conveyorTile = findBestConveyorTile(dx_, dy_, drillSize, coreX, coreY);
-                            if (conveyorTile != null) {
-                                int dist = Math.abs(conveyorTile.x - coreX) + Math.abs(conveyorTile.y - coreY);
-                                candidates.add(new DrillPlacement(dx_, dy_, conveyorTile.x, conveyorTile.y, covered, dist, bestDrill));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (candidates.isEmpty()) return null;
-
-        candidates.sort((a, b) -> {
-            int byCovered = Integer.compare(b.covered, a.covered);
-            if (byCovered != 0) return byCovered;
-            return Integer.compare(a.coreDist, b.coreDist);
-        });
-
-        return candidates.first();
-    }
-
-    private static Drill findBestDrillForOre(OreBlock ore) {
-        Item item = getItemFromOre(ore);
-        if (item != null) {
-            Drill existing = KryptosFieldTier.matchExistingDrill(Vars.player.team(), item);
-            if (existing != null) return existing;
-        }
-
-        Seq<Block> blocks = Vars.content.blocks();
-        Drill best = null;
-        int bestTier = -1;
-
-        for (Block block : blocks) {
-            if (!(block instanceof Drill)) continue;
-            Drill drill = (Drill) block;
-            if (!drill.unlockedNow() && !Vars.state.rules.infiniteResources) continue;
-            if (drill.drillTime <= 0) continue;
-
-            if (drill.tier > bestTier) {
-                bestTier = drill.tier;
-                best = drill;
-            }
-        }
-
-        return best != null ? best : findAnyDrill();
-    }
-
-    private static Item getItemFromOre(OreBlock ore) {
-        if (ore == Blocks.oreCopper) return Items.copper;
-        if (ore == Blocks.oreLead) return Items.lead;
-        if (ore == Blocks.oreCoal) return Items.coal;
-        if (ore == Blocks.oreTitanium) return Items.titanium;
-        if (ore == Blocks.oreThorium) return Items.thorium;
-        if (ore == Blocks.oreScrap) return Items.scrap;
-        if (ore == KryptosBlocks.oreCustom) return KryptosItems.customOre;
-        return null;
-    }
-
-    private static Drill findAnyDrill() {
-        Seq<Block> blocks = Vars.content.blocks();
-        for (Block block : blocks) {
-            if (block instanceof Drill) return (Drill) block;
-        }
-        return null;
-    }
-
-    private static boolean canPlaceDrill(int x, int y, int size, OreBlock ore) {
-        int half = size / 2;
-        for (int dx = -half; dx <= half; dx++) {
-            for (int dy = -half; dy <= half; dy++) {
-                Tile t = world.tile(x + dx, y + dy);
-                if (t == null) return false;
-                if (t.block() != Blocks.air && !(t.block() instanceof OreBlock)) return false;
-                if (t.floor().isLiquid) return false;
-                if (t.build != null && !(t.build.block instanceof OreBlock)) return false;
-            }
-        }
-        return true;
-    }
-
-    private static int countOreCovered(int cx, int cy, int size, int coverage, OreBlock ore) {
-        int count = 0;
-        int half = size / 2;
-        int range = half + coverage;
-
-        for (int dx = -range; dx <= range; dx++) {
-            for (int dy = -range; dy <= range; dy++) {
-                if (dx * dx + dy * dy > range * range) continue;
-                int x = cx + dx;
-                int y = cy + dy;
-                if (x < 0 || y < 0 || x >= world.width() || y >= world.height()) continue;
-                Tile t = world.tile(x, y);
-                if (t != null && t.overlay() == ore) count++;
-            }
-        }
-        return count;
+    private static int distToCore(Building b, int coreX, int coreY) {
+        return Math.abs(b.tile.x - coreX) + Math.abs(b.tile.y - coreY);
     }
 
     private static Tile findBestConveyorTile(int drillX, int drillY, int drillSize, int coreX, int coreY) {
@@ -434,6 +233,7 @@ public final class KryptosAutoConveyor {
         Arrays.fill(prev, -1);
 
         PriorityQueue<Node> open = new PriorityQueue<>((a, b) -> Float.compare(a.f, b.f));
+
         gScore[startIdx] = 0;
         fScore[startIdx] = heuristic(startX, startY, coreX, coreY);
         open.add(new Node(startIdx, fScore[startIdx]));
@@ -487,9 +287,6 @@ public final class KryptosAutoConveyor {
     }
 
     private static IntSeq tryBridgePath(int startX, int startY, Building core, int w, int h) {
-        int coreX = core.tile.x;
-        int coreY = core.tile.y;
-
         for (int dir = 0; dir < 4; dir++) {
             for (int len = 2; len <= MAX_BRIDGE_LENGTH; len++) {
                 int bx = startX + DX4[dir] * len;
@@ -560,18 +357,13 @@ public final class KryptosAutoConveyor {
         return false;
     }
 
-    private static void serveDeposit(IntSeq cluster, int key, DrillPlacement placement, IntSeq path, Building core, OreBlock ore) {
-        KryptosOreRegistry.claim(key);
+    private static void serveDrillPath(Building drill, int key, IntSeq path, Building core) {
+        servedDrills.add(key);
 
         Unit unit = helperUnit;
         if (unit == null) return;
 
         Seq<BuildPlan> plans = new Seq<>();
-
-        Drill bestDrill = findBestDrillForOre(ore);
-        if (bestDrill != null && canPlaceDrill(placement.drillX, placement.drillY, bestDrill.size, ore)) {
-            plans.add(new BuildPlan(placement.drillX, placement.drillY, 0, bestDrill));
-        }
 
         for (int i = 0; i < path.size; i++) {
             int x = Point2.x(path.items[i]);
@@ -596,8 +388,8 @@ public final class KryptosAutoConveyor {
             unit.addBuild(plan);
         }
 
-        Log.info("[Kryptos] AutoConveyor: queued @ total build steps (1 drill + belts) from @,@ ore to core.",
-                plans.size, placement.drillX, placement.drillY);
+        Log.info("[Kryptos] AutoConveyor: queued @ belts for drill at @,@ -> core.",
+                plans.size, drill.tile.x, drill.tile.y);
     }
 
     private static Block selectConveyorType(int index, int pathLength, Tile tile) {
@@ -635,24 +427,6 @@ public final class KryptosAutoConveyor {
             if (neighbor != null && neighbor.build == core) return dir;
         }
         return 0;
-    }
-
-    private static class DrillPlacement {
-        final int drillX, drillY;
-        final int conveyorX, conveyorY;
-        final int covered;
-        final int coreDist;
-        final Drill drill;
-
-        DrillPlacement(int dx, int dy, int cx, int cy, int covered, int dist, Drill drill) {
-            this.drillX = dx;
-            this.drillY = dy;
-            this.conveyorX = cx;
-            this.conveyorY = cy;
-            this.covered = covered;
-            this.coreDist = dist;
-            this.drill = drill;
-        }
     }
 
     private static class Node {
