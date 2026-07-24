@@ -22,6 +22,8 @@ import mindustry.gen.Building;
 import mindustry.gen.Groups;
 import mindustry.gen.Unit;
 import mindustry.type.Item;
+import mindustry.type.ItemStack;
+import mindustry.gen.CoreBuild;
 import mindustry.world.Block;
 import mindustry.world.Tile;
 import mindustry.world.blocks.production.Drill;
@@ -328,22 +330,44 @@ public final class KryptosSmartDrill {
         if (existing != null) return existing;
 
         Seq<Block> blocks = Vars.content.blocks();
-        Drill best = null;
-        int bestTier = -1;
+        Seq<Drill> candidates = new Seq<>();
 
         for (Block block : blocks) {
             if (!(block instanceof Drill)) continue;
             Drill drill = (Drill) block;
             if (!drill.unlockedNow() && !Vars.state.rules.infiniteResources) continue;
             if (drill.drillTime <= 0) continue;
+            candidates.add(drill);
+        }
 
-            if (drill.tier > bestTier) {
-                bestTier = drill.tier;
-                best = drill;
+        if (candidates.isEmpty()) return findAnyDrill();
+        if (Vars.state.rules.infiniteResources) {
+            candidates.sort((a, b) -> Integer.compare(b.tier, a.tier));
+            return candidates.first();
+        }
+
+        // Highest tier first, then walk down until we find one the core can
+        // actually afford right now -- unlocked doesn't mean buildable, and
+        // queuing a plan for materials we don't have yet just leaves it
+        // sitting unbuilt. Falls back to the lowest tier (usually the free
+        // Mechanical Drill) if nothing pricier is affordable yet.
+        candidates.sort((a, b) -> Integer.compare(b.tier, a.tier));
+
+        CoreBuild core = Vars.player.team().core();
+        if (core != null) {
+            for (Drill drill : candidates) {
+                if (canAfford(core, drill)) return drill;
             }
         }
 
-        return best != null ? best : findAnyDrill();
+        return candidates.peek();
+    }
+
+    private static boolean canAfford(CoreBuild core, Block block) {
+        for (ItemStack stack : block.requirements) {
+            if (core.items.get(stack.item) < stack.amount) return false;
+        }
+        return true;
     }
 
     private static Drill findAnyDrill() {
