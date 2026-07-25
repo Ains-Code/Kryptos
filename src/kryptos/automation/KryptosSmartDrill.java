@@ -3,6 +3,7 @@ package kryptos.automation;
 import arc.Events;
 import arc.math.geom.Point2;
 import arc.struct.IntSeq;
+import arc.struct.IntSet;
 import arc.struct.ObjectMap;
 import arc.struct.Seq;
 import arc.util.Log;
@@ -282,8 +283,8 @@ public final class KryptosSmartDrill {
 
     private static Seq<DrillPlan> tileDeposit(OreDeposit deposit, Building core) {
         Seq<DrillPlan> result = new Seq<>();
-        arc.struct.IntSet reservedTiles = new arc.struct.IntSet();
-        arc.struct.IntSet coveredOre = new arc.struct.IntSet();
+        IntSet reservedTiles = new IntSet();
+        IntSet coveredOre = new IntSet();
 
         for (int n = 0; n < MAX_DRILLS_PER_DEPOSIT; n++) {
             boolean anyUncovered = false;
@@ -314,7 +315,7 @@ public final class KryptosSmartDrill {
     }
 
     private static DrillPlan createDrillPlan(OreDeposit deposit, Building core,
-            arc.struct.IntSet reservedTiles, arc.struct.IntSet coveredOre) {
+            IntSet reservedTiles, IntSet coveredOre) {
         int coreX = core.tile.x;
         int coreY = core.tile.y;
 
@@ -419,6 +420,50 @@ public final class KryptosSmartDrill {
             if (block instanceof Drill) return (Drill) block;
         }
         return null;
+    }
+
+    /** Like canPlaceDrill(x, y, size, item), but also rejects tiles already reserved by a drill placed earlier in the same tiling pass (see tileDeposit). */
+    private static boolean canPlaceDrill(int x, int y, int size, IntSet reservedTiles) {
+        int half = size / 2;
+        for (int dx = -half; dx <= half; dx++) {
+            for (int dy = -half; dy <= half; dy++) {
+                int tx = x + dx, ty = y + dy;
+                if (reservedTiles.contains(Point2.pack(tx, ty))) return false;
+                Tile t = world.tile(tx, ty);
+                if (t == null) return false;
+                if (t.block() != Blocks.air && !(t.block() instanceof OreBlock)) return false;
+                if (t.floor().isLiquid) return false;
+                if (t.build != null && !(t.build.block instanceof OreBlock)) return false;
+            }
+        }
+        return true;
+    }
+
+    /** Like countOreCovered(cx, cy, size, item), but only counts ore tiles not already marked covered by an earlier drill in the same tiling pass (see tileDeposit). */
+    private static int countNewOreCovered(int cx, int cy, int size, Item item, IntSet coveredOre) {
+        int count = 0;
+        int half = size / 2;
+        int range = half + 1;
+
+        for (int dx = -range; dx <= range; dx++) {
+            for (int dy = -range; dy <= range; dy++) {
+                if (dx * dx + dy * dy > range * range) continue;
+                int x = cx + dx;
+                int y = cy + dy;
+                if (x < 0 || y < 0 || x >= world.width() || y >= world.height()) continue;
+                if (coveredOre.contains(Point2.pack(x, y))) continue;
+                Tile t = world.tile(x, y);
+                if (t != null) {
+                    Block overlay = t.overlay();
+                    if (overlay instanceof OreBlock) {
+                        OreBlock ore = (OreBlock) overlay;
+                        Item oreItem = getItemFromOre(ore);
+                        if (oreItem == item) count++;
+                    }
+                }
+            }
+        }
+        return count;
     }
 
     private static boolean canPlaceDrill(int x, int y, int size, Item item) {
