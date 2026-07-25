@@ -354,6 +354,14 @@ public final class KryptosSmartDrill {
         }
 
         IntSet reservedTiles = new IntSet();
+        // Belt tiles queued by an earlier drill in THIS pass. A later drill's
+        // path is allowed to stop here instead of running all the way to the
+        // core -- Mindustry conveyors merge fine when a short belt feeds into
+        // the side of an existing line, so once one drill has a route to the
+        // core, its neighbors just need to reach THAT line, not repeat the
+        // whole trip. Without this, a 6-drill cluster could queue 6 separate
+        // full-length belt runs criss-crossing back to the core individually.
+        IntSet trunkTiles = new IntSet();
 
         gridScan:
         for (int gx = minX - size + 1 + bestOffX; gx <= maxX; gx += size) {
@@ -366,10 +374,14 @@ public final class KryptosSmartDrill {
                 Tile conveyorTile = findBestConveyorTile(gx, gy, size, core.tile.x, core.tile.y, reservedTiles);
                 if (conveyorTile == null) continue;
 
-                IntSeq path = findPathAStar(conveyorTile.x, conveyorTile.y, core, reservedTiles);
+                IntSeq path = findPathAStar(conveyorTile.x, conveyorTile.y, core, reservedTiles, trunkTiles);
                 if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) continue;
 
-                DrillPlan plan = new DrillPlan(gx, gy, conveyorTile.x, conveyorTile.y, bestDrill, deposit.item, path, deposit.key);
+                int lastX = Point2.x(path.items[path.size - 1]);
+                int lastY = Point2.y(path.items[path.size - 1]);
+                int exitRotation = rotationTowardGoal(lastX, lastY, core.tile.x, core.tile.y, trunkTiles);
+
+                DrillPlan plan = new DrillPlan(gx, gy, conveyorTile.x, conveyorTile.y, bestDrill, deposit.item, path, deposit.key, exitRotation);
                 result.add(plan);
 
                 for (int dx = -half; dx <= half; dx++) {
@@ -379,6 +391,7 @@ public final class KryptosSmartDrill {
                 }
                 for (int i = 0; i < path.size; i++) {
                     reservedTiles.add(path.items[i]);
+                    trunkTiles.add(path.items[i]);
                 }
             }
         }
@@ -504,33 +517,46 @@ public final class KryptosSmartDrill {
         return count;
     }
 
+    // Scans every tile orthogonally touching the drill's footprint (the full
+    // perimeter ring, corners excluded) instead of one fixed point per side.
+    // The old version checked only the single tile centered on each side --
+    // for a 1x1 drill that's the only option anyway, but for anything bigger
+    // (or when tileDeposit has already packed a neighboring drill right up
+    // against one side), that one exact point is very often the tile that's
+    // blocked, even though the rest of that side is wide open. Scanning the
+    // whole ring picks the closest walkable tile on ANY side instead of
+    // giving up because of one specific blocked spot.
     private static Tile findBestConveyorTile(int drillX, int drillY, int drillSize, int coreX, int coreY, IntSet reservedTiles) {
         int half = drillSize / 2;
+        int ring = half + 1;
         Tile best = null;
         int bestDist = Integer.MAX_VALUE;
 
-        for (int dir = 0; dir < 4; dir++) {
-            int cx = drillX + DX4[dir] * (half + 1);
-            int cy = drillY + DY4[dir] * (half + 1);
+        for (int dx = -ring; dx <= ring; dx++) {
+            for (int dy = -ring; dy <= ring; dy++) {
+                boolean onXEdge = dx == -ring || dx == ring;
+                boolean onYEdge = dy == -ring || dy == ring;
+                if (onXEdge == onYEdge) continue; // skip corners (both/neither edge) -- keep only orthogonal-adjacent tiles
 
-            if (cx < 0 || cy < 0 || cx >= world.width() || cy >= world.height()) continue;
-            if (reservedTiles.contains(Point2.pack(cx, cy))) continue;
+                int cx = drillX + dx, cy = drillY + dy;
+                if (cx < 0 || cy < 0 || cx >= world.width() || cy >= world.height()) continue;
+                if (reservedTiles.contains(Point2.pack(cx, cy))) continue;
 
-            Tile t = world.tile(cx, cy);
-            if (t == null) continue;
-            if (!isConveyorWalkable(t)) continue;
+                Tile t = world.tile(cx, cy);
+                if (t == null || !isConveyorWalkable(t)) continue;
 
-            int dist = Math.abs(cx - coreX) + Math.abs(cy - coreY);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = t;
+                int dist = Math.abs(cx - coreX) + Math.abs(cy - coreY);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = t;
+                }
             }
         }
 
         return best;
     }
 
-    private static IntSeq findPathAStar(int startX, int startY, Building core, IntSet reservedTiles) {
+    private static IntSeq findPathAStar(int startX, int startY, Building core, IntSet reservedTiles, IntSet trunkTiles) {
         int w = world.width();
         int h = world.height();
         int coreX = core.tile.x;
@@ -566,7 +592,16 @@ public final class KryptosSmartDrill {
             int x = idx % w;
             int y = idx / w;
 
-            if (touchesCore(x, y, core)) {
+            // Reaching the core is always a valid goal; reaching a belt tile
+            // another drill in this same pass already queued is ALSO a valid
+            // goal -- joining that line gets items to the core just as well,
+            // usually for a fraction of the distance. heuristic() below still
+            // only measures distance-to-core, so this doesn't perfectly bias
+            // the search toward the nearest trunk tile, but since every trunk
+            // tile is itself already on a shortest path to the core, a
+            // straight-line search toward the core tends to run right past
+            // (or very near) them anyway.
+            if (touchesCore(x, y, core) || touchesTrunk(x, y, trunkTiles)) {
                 goalIdx = idx;
                 break;
             }
@@ -657,6 +692,13 @@ public final class KryptosSmartDrill {
         return false;
     }
 
+    private static boolean touchesTrunk(int x, int y, IntSet trunkTiles) {
+        for (int dir = 0; dir < 4; dir++) {
+            if (trunkTiles.contains(Point2.pack(x + DX4[dir], y + DY4[dir]))) return true;
+        }
+        return false;
+    }
+
     private static void manageExistingDrills(Building core, ObjectMap<Item, Seq<OreDeposit>> depositsByItem) {
         Team team = Vars.player.team();
         Seq<Building> drills = new Seq<>();
@@ -729,7 +771,7 @@ public final class KryptosSmartDrill {
                     int ny = Point2.y(plan.path.items[i + 1]);
                     rotation = rotationFor(nx - x, ny - y);
                 } else {
-                    rotation = rotationTowardCore(x, y, core.tile.x, core.tile.y);
+                    rotation = plan.exitRotation;
                 }
 
                 Block conveyorType = selectConveyorType(i, plan.path.size, tile);
@@ -775,6 +817,19 @@ public final class KryptosSmartDrill {
         return 0;
     }
 
+    // Same as rotationTowardCore, but also checks for an adjacent trunk tile
+    // (a belt already queued by an earlier drill in this tiling pass) --
+    // whichever one findPathAStar actually stopped next to is the direction
+    // the last belt in the path needs to face.
+    private static int rotationTowardGoal(int x, int y, int coreX, int coreY, IntSet trunkTiles) {
+        for (int dir = 0; dir < 4; dir++) {
+            int nx = x + DX4[dir];
+            int ny = y + DY4[dir];
+            if (trunkTiles.contains(Point2.pack(nx, ny))) return dir;
+        }
+        return rotationTowardCore(x, y, coreX, coreY);
+    }
+
     private static Item getItemFromOre(OreBlock ore) {
         if (ore == Blocks.oreCopper) return Items.copper;
         if (ore == Blocks.oreLead) return Items.lead;
@@ -811,8 +866,13 @@ public final class KryptosSmartDrill {
         final IntSeq path;
         final int depositKey;
         final int coveredOre;
+        // Rotation for the LAST belt tile in path, computed back in
+        // tileDeposit() while trunkTiles is still in scope -- by the time
+        // executePlans() runs, trunkTiles (which drills joined which belt)
+        // no longer exists, so it can't be recomputed here.
+        final int exitRotation;
 
-        DrillPlan(int dx, int dy, int cx, int cy, Drill drill, Item item, IntSeq path, int key) {
+        DrillPlan(int dx, int dy, int cx, int cy, Drill drill, Item item, IntSeq path, int key, int exitRotation) {
             this.drillX = dx;
             this.drillY = dy;
             this.conveyorX = cx;
@@ -822,6 +882,7 @@ public final class KryptosSmartDrill {
             this.path = path;
             this.depositKey = key;
             this.coveredOre = countOreCovered(dx, dy, drill.size, item);
+            this.exitRotation = exitRotation;
         }
     }
 
