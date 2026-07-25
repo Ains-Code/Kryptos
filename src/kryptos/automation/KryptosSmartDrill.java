@@ -46,6 +46,11 @@ public final class KryptosSmartDrill {
     private static final int MAX_PATH_ATTEMPTS_PER_CYCLE = 8;
     private static final int MAX_PATH_SEARCH_TILES = 15000;
     private static final int MAX_PATH_LENGTH = 180;
+    // Blocks.itemBridge ("bridge-conveyor"): range = 4, no power required --
+    // verified against Mindustry's own ItemBridge/Blocks source. Two bridges
+    // must share the exact same row or column to link, distance 2..range
+    // (1 would just be a normal adjacent tile, no bridge needed).
+    private static final int BRIDGE_RANGE = 4;
 
     private static final int[] DX4 = {1, 0, -1, 0};
     private static final int[] DY4 = {0, 1, 0, -1};
@@ -375,23 +380,43 @@ public final class KryptosSmartDrill {
                 if (conveyorTile == null) continue;
 
                 IntSeq path = findPathAStar(conveyorTile.x, conveyorTile.y, core, reservedTiles, trunkTiles);
-                if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) continue;
 
-                int lastX = Point2.x(path.items[path.size - 1]);
-                int lastY = Point2.y(path.items[path.size - 1]);
-                int exitRotation = rotationTowardGoal(lastX, lastY, core.tile.x, core.tile.y, trunkTiles);
+                DrillPlan plan;
+                if (path != null && path.size > 0 && path.size <= MAX_PATH_LENGTH) {
+                    int lastX = Point2.x(path.items[path.size - 1]);
+                    int lastY = Point2.y(path.items[path.size - 1]);
+                    int exitRotation = rotationTowardGoal(lastX, lastY, core.tile.x, core.tile.y, trunkTiles);
 
-                DrillPlan plan = new DrillPlan(gx, gy, conveyorTile.x, conveyorTile.y, bestDrill, deposit.item, path, deposit.key, exitRotation);
+                    plan = DrillPlan.viaPath(gx, gy, conveyorTile.x, conveyorTile.y, bestDrill, deposit.item, path, deposit.key, exitRotation);
+
+                    for (int i = 0; i < path.size; i++) {
+                        reservedTiles.add(path.items[i]);
+                        trunkTiles.add(path.items[i]);
+                    }
+                } else {
+                    // No ground route around the other drills already packed
+                    // into this cluster (or it exceeded MAX_PATH_LENGTH) --
+                    // before giving up on this drill entirely, try hopping
+                    // straight over whatever's blocking it with an Item
+                    // Bridge instead. This is what actually makes dense
+                    // packing work: a bridge doesn't care what's sitting
+                    // between its two ends, unlike a belt.
+                    int[] bridgeFar = findBridgeHop(conveyorTile.x, conveyorTile.y, core, reservedTiles, trunkTiles);
+                    if (bridgeFar == null) continue;
+
+                    plan = DrillPlan.viaBridge(gx, gy, conveyorTile.x, conveyorTile.y, bridgeFar[0], bridgeFar[1], bestDrill, deposit.item, deposit.key);
+
+                    reservedTiles.add(Point2.pack(conveyorTile.x, conveyorTile.y));
+                    reservedTiles.add(Point2.pack(bridgeFar[0], bridgeFar[1]));
+                    trunkTiles.add(Point2.pack(bridgeFar[0], bridgeFar[1]));
+                }
+
                 result.add(plan);
 
                 for (int dx = -half; dx <= half; dx++) {
                     for (int dy = -half; dy <= half; dy++) {
                         reservedTiles.add(Point2.pack(gx + dx, gy + dy));
                     }
-                }
-                for (int i = 0; i < path.size; i++) {
-                    reservedTiles.add(path.items[i]);
-                    trunkTiles.add(path.items[i]);
                 }
             }
         }
@@ -554,6 +579,33 @@ public final class KryptosSmartDrill {
         }
 
         return best;
+    }
+
+    // Looks straight out from (startX, startY) in each of the 4 cardinal
+    // directions, 2..BRIDGE_RANGE tiles, for a tile that's (a) actually free
+    // to build on and (b) adjacent to the core or an existing trunk tile --
+    // i.e. a valid far end for an Item Bridge. Unlike findPathAStar, this
+    // doesn't care what's sitting in between the two points (a bridge
+    // legitimately skips over whatever's there, including other drills'
+    // bodies), so it's specifically useful for a drill whose only exit tile
+    // is boxed in on the ground by its own neighbors in the same cluster.
+    private static int[] findBridgeHop(int startX, int startY, Building core, IntSet reservedTiles, IntSet trunkTiles) {
+        for (int dir = 0; dir < 4; dir++) {
+            for (int dist = 2; dist <= BRIDGE_RANGE; dist++) {
+                int fx = startX + DX4[dir] * dist;
+                int fy = startY + DY4[dir] * dist;
+                if (fx < 0 || fy < 0 || fx >= world.width() || fy >= world.height()) break;
+
+                if (reservedTiles.contains(Point2.pack(fx, fy))) continue;
+                Tile t = world.tile(fx, fy);
+                if (!isConveyorWalkable(t)) continue;
+
+                if (touchesCore(fx, fy, core) || touchesTrunk(fx, fy, trunkTiles)) {
+                    return new int[]{fx, fy};
+                }
+            }
+        }
+        return null;
     }
 
     private static IntSeq findPathAStar(int startX, int startY, Building core, IntSet reservedTiles, IntSet trunkTiles) {
@@ -759,6 +811,27 @@ public final class KryptosSmartDrill {
 
             buildPlans.add(new BuildPlan(plan.drillX, plan.drillY, 0, plan.drillType));
 
+            if (plan.usesBridge()) {
+                // Near end carries the link as a relative Point2 offset (see
+                // ItemBridge's Point2 config handler in the engine source) --
+                // this is what makes it pre-linked the instant it's built,
+                // no player drag-to-link step needed.
+                Point2 offset = new Point2(plan.bridgeFarX - plan.conveyorX, plan.bridgeFarY - plan.conveyorY);
+                buildPlans.add(new BuildPlan(plan.conveyorX, plan.conveyorY, 0, Blocks.itemBridge, offset));
+                // Far end needs no config -- once it receives items it just
+                // dumps them onward through its own open side (the trunk
+                // belt, or straight into the core if it landed next to it),
+                // exactly like any other building's default dump behavior.
+                buildPlans.add(new BuildPlan(plan.bridgeFarX, plan.bridgeFarY, 0, Blocks.itemBridge));
+
+                for (BuildPlan bp : buildPlans) {
+                    unit.addBuild(bp);
+                }
+
+                Log.info("[Kryptos] SmartDrill: queued bridge + drill for @ (@ tiles)", plan.item.name, plan.coveredOre);
+                continue;
+            }
+
             for (int i = 0; i < plan.path.size; i++) {
                 int x = Point2.x(plan.path.items[i]);
                 int y = Point2.y(plan.path.items[i]);
@@ -863,16 +936,22 @@ public final class KryptosSmartDrill {
         final int conveyorX, conveyorY;
         final Drill drillType;
         final Item item;
-        final IntSeq path;
+        final IntSeq path; // null when using a bridge instead -- see bridgeFarX/Y
         final int depositKey;
         final int coveredOre;
         // Rotation for the LAST belt tile in path, computed back in
         // tileDeposit() while trunkTiles is still in scope -- by the time
         // executePlans() runs, trunkTiles (which drills joined which belt)
-        // no longer exists, so it can't be recomputed here.
+        // no longer exists, so it can't be recomputed here. Unused when path
+        // is null (bridges don't need a facing rotation -- see findBridgeHop).
         final int exitRotation;
+        // Set only when this drill has no ground route to the core/trunk and
+        // is instead reached via an Item Bridge hop from (conveyorX, conveyorY)
+        // to (bridgeFarX, bridgeFarY). -1 when path is used instead.
+        final int bridgeFarX, bridgeFarY;
 
-        DrillPlan(int dx, int dy, int cx, int cy, Drill drill, Item item, IntSeq path, int key, int exitRotation) {
+        private DrillPlan(int dx, int dy, int cx, int cy, Drill drill, Item item, IntSeq path, int key,
+                int exitRotation, int bridgeFarX, int bridgeFarY) {
             this.drillX = dx;
             this.drillY = dy;
             this.conveyorX = cx;
@@ -883,6 +962,20 @@ public final class KryptosSmartDrill {
             this.depositKey = key;
             this.coveredOre = countOreCovered(dx, dy, drill.size, item);
             this.exitRotation = exitRotation;
+            this.bridgeFarX = bridgeFarX;
+            this.bridgeFarY = bridgeFarY;
+        }
+
+        static DrillPlan viaPath(int dx, int dy, int cx, int cy, Drill drill, Item item, IntSeq path, int key, int exitRotation) {
+            return new DrillPlan(dx, dy, cx, cy, drill, item, path, key, exitRotation, -1, -1);
+        }
+
+        static DrillPlan viaBridge(int dx, int dy, int cx, int cy, int farX, int farY, Drill drill, Item item, int key) {
+            return new DrillPlan(dx, dy, cx, cy, drill, item, null, key, 0, farX, farY);
+        }
+
+        boolean usesBridge() {
+            return path == null;
         }
     }
 
