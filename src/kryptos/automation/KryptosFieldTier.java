@@ -1,10 +1,13 @@
 package kryptos.automation;
 
 import arc.struct.ObjectIntMap;
+import arc.struct.Seq;
+import mindustry.Vars;
 import mindustry.game.Team;
 import mindustry.gen.Building;
 import mindustry.gen.Groups;
 import mindustry.type.Item;
+import mindustry.type.ItemStack;
 import mindustry.world.Block;
 import mindustry.world.blocks.distribution.Conveyor;
 import mindustry.world.blocks.production.Drill;
@@ -50,6 +53,46 @@ final class KryptosFieldTier {
         });
 
         return mostCommon(counts);
+    }
+
+    /**
+     * Highest-tier unlocked (and currently affordable) conveyor, for when
+     * there's nothing already on the field to match against (see
+     * {@link #matchExistingConveyor}) -- e.g. the very first belt of the
+     * game. Previously this fallback only ever chose between the basic
+     * Conveyor and Titanium Conveyor; this instead considers every Conveyor
+     * block in the game (Plastanium, Armored, etc.), mirroring how
+     * {@code findBestDrillForItem} already picks drills by tier.
+     */
+    static Block bestUnlockedConveyor(Team team) {
+        Seq<Conveyor> candidates = new Seq<>();
+
+        for (Block block : Vars.content.blocks()) {
+            if (!(block instanceof Conveyor conveyor)) continue;
+            if (!conveyor.unlockedNow() && !Vars.state.rules.infiniteResources) continue;
+            candidates.add(conveyor);
+        }
+
+        if (candidates.isEmpty()) return null;
+        candidates.sort((a, b) -> Float.compare(b.speed, a.speed));
+
+        if (Vars.state.rules.infiniteResources) return candidates.first();
+
+        Building core = team.core();
+        if (core != null) {
+            for (Conveyor conveyor : candidates) {
+                if (canAfford(core, conveyor)) return conveyor;
+            }
+        }
+
+        return candidates.peek();
+    }
+
+    private static boolean canAfford(Building core, Block block) {
+        for (ItemStack stack : block.requirements) {
+            if (core.items.get(stack.item) < stack.amount) return false;
+        }
+        return true;
     }
 
     private static <T> T mostCommon(ObjectIntMap<T> counts) {
