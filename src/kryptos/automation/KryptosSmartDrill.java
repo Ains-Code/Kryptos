@@ -587,7 +587,7 @@ public final class KryptosSmartDrill {
                 // the plan then gets silently dropped by KryptosDroneAI the
                 // moment the drone reaches it and finds the tile occupied,
                 // which is what read as "random" drone behavior.
-                if (reservedTiles.contains(nIdx)) continue;
+                if (reservedTiles.contains(Point2.pack(nx, ny))) continue;
 
                 Tile t = world.tile(nx, ny);
                 if (!isConveyorWalkable(t)) continue;
