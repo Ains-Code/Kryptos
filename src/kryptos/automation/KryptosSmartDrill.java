@@ -306,95 +306,106 @@ public final class KryptosSmartDrill {
     // budget and starve every other deposit.
     private static final int MAX_DRILLS_PER_DEPOSIT = 6;
 
+    // Tiles the deposit's whole bounding box with a repeating size-spaced grid
+    // and keeps every cell that overlaps ore, instead of hill-climbing to a
+    // single "best" position one drill at a time. This is the same idea as
+    // Ains-Code/mod-mindustry's SmartDrillFeature.isDrillTile() -- a fixed
+    // periodic stamp (there: hardcoded mod-6 for 2x2 drills specifically) --
+    // generalized here to search the best grid phase for whatever drill size
+    // KryptosFieldTier picked, so it works the same for a size-2 mechanical
+    // drill or a size-4 laser drill without hardcoding either.
     private static Seq<DrillPlan> tileDeposit(OreDeposit deposit, Building core) {
         Seq<DrillPlan> result = new Seq<>();
+
+        Drill bestDrill = findBestDrillForItem(deposit.item);
+        if (bestDrill == null) return result;
+
+        int size = bestDrill.size;
+        int half = size / 2;
+
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE;
+        for (int i = 0; i < deposit.cluster.size; i++) {
+            int x = Point2.x(deposit.cluster.items[i]);
+            int y = Point2.y(deposit.cluster.items[i]);
+            minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        }
+
+        // Try every phase of the grid (0..size-1 on each axis) and keep
+        // whichever lines up with the most ore -- an odd-shaped vein tiles
+        // more completely under one phase than another, and there's no way
+        // to know which without checking.
+        int bestOffX = 0, bestOffY = 0, bestScore = -1;
+        for (int offX = 0; offX < size; offX++) {
+            for (int offY = 0; offY < size; offY++) {
+                int score = 0;
+                for (int gx = minX - size + 1 + offX; gx <= maxX; gx += size) {
+                    for (int gy = minY - size + 1 + offY; gy <= maxY; gy += size) {
+                        score += countOreInFootprint(gx, gy, half, deposit.item);
+                    }
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestOffX = offX;
+                    bestOffY = offY;
+                }
+            }
+        }
+
         IntSet reservedTiles = new IntSet();
-        IntSet coveredOre = new IntSet();
 
-        for (int n = 0; n < MAX_DRILLS_PER_DEPOSIT; n++) {
-            boolean anyUncovered = false;
-            for (int i = 0; i < deposit.cluster.size; i++) {
-                if (!coveredOre.contains(deposit.cluster.items[i])) { anyUncovered = true; break; }
-            }
-            if (!anyUncovered) break;
+        gridScan:
+        for (int gx = minX - size + 1 + bestOffX; gx <= maxX; gx += size) {
+            for (int gy = minY - size + 1 + bestOffY; gy <= maxY; gy += size) {
+                if (result.size >= MAX_DRILLS_PER_DEPOSIT) break gridScan;
 
-            DrillPlan plan = createDrillPlan(deposit, core, reservedTiles, coveredOre);
-            if (plan == null) break;
-            result.add(plan);
+                if (countOreInFootprint(gx, gy, half, deposit.item) <= 0) continue;
+                if (!canPlaceDrill(gx, gy, size, reservedTiles)) continue;
 
-            int half = plan.drillType.size / 2;
-            for (int dx = -half; dx <= half; dx++) {
-                for (int dy = -half; dy <= half; dy++) {
-                    reservedTiles.add(Point2.pack(plan.drillX + dx, plan.drillY + dy));
+                Tile conveyorTile = findBestConveyorTile(gx, gy, size, core.tile.x, core.tile.y, reservedTiles);
+                if (conveyorTile == null) continue;
+
+                IntSeq path = findPathAStar(conveyorTile.x, conveyorTile.y, core, reservedTiles);
+                if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) continue;
+
+                DrillPlan plan = new DrillPlan(gx, gy, conveyorTile.x, conveyorTile.y, bestDrill, deposit.item, path, deposit.key);
+                result.add(plan);
+
+                for (int dx = -half; dx <= half; dx++) {
+                    for (int dy = -half; dy <= half; dy++) {
+                        reservedTiles.add(Point2.pack(gx + dx, gy + dy));
+                    }
                 }
-            }
-            int range = half + 1;
-            for (int dx = -range; dx <= range; dx++) {
-                for (int dy = -range; dy <= range; dy++) {
-                    coveredOre.add(Point2.pack(plan.drillX + dx, plan.drillY + dy));
+                for (int i = 0; i < path.size; i++) {
+                    reservedTiles.add(path.items[i]);
                 }
-            }
-            for (int i = 0; i < plan.path.size; i++) {
-                reservedTiles.add(plan.path.items[i]);
             }
         }
 
         return result;
     }
 
-    private static DrillPlan createDrillPlan(OreDeposit deposit, Building core,
-            IntSet reservedTiles, IntSet coveredOre) {
-        int coreX = core.tile.x;
-        int coreY = core.tile.y;
-
-        Drill bestDrill = findBestDrillForItem(deposit.item);
-        if (bestDrill == null) return null;
-
-        int drillSize = bestDrill.size;
-        int half = drillSize / 2;
-
-        int bestDrillX = -1, bestDrillY = -1, bestCovered = -1;
-        int bestConveyorX = -1, bestConveyorY = -1;
-
-        for (int i = 0; i < deposit.cluster.size; i++) {
-            int cx = Point2.x(deposit.cluster.items[i]);
-            int cy = Point2.y(deposit.cluster.items[i]);
-
-            for (int dx = -half; dx <= half; dx++) {
-                for (int dy = -half; dy <= half; dy++) {
-                    int drillX = cx + dx;
-                    int drillY = cy + dy;
-
-                    if (!canPlaceDrill(drillX, drillY, drillSize, reservedTiles)) continue;
-
-                    int covered = countNewOreCovered(drillX, drillY, drillSize, deposit.item, coveredOre);
-                    if (covered <= 0) continue;
-
-                    Tile conveyorTile = findBestConveyorTile(drillX, drillY, drillSize, coreX, coreY, reservedTiles);
-                    if (conveyorTile == null) continue;
-
-                    if (covered > bestCovered) {
-                        bestCovered = covered;
-                        bestDrillX = drillX;
-                        bestDrillY = drillY;
-                        bestConveyorX = conveyorTile.x;
-                        bestConveyorY = conveyorTile.y;
-                    }
+    // Counts ore tiles of `item` strictly inside a drill's actual footprint
+    // (not the wider "nearby" radius countOreCovered uses for hill-climbing)
+    // -- for a fixed grid stamp we only care whether this exact cell has ore
+    // under it, not whether ore is somewhere nearby.
+    private static int countOreInFootprint(int cx, int cy, int half, Item item) {
+        int count = 0;
+        for (int dx = -half; dx <= half; dx++) {
+            for (int dy = -half; dy <= half; dy++) {
+                int x = cx + dx, y = cy + dy;
+                if (x < 0 || y < 0 || x >= world.width() || y >= world.height()) continue;
+                Tile t = world.tile(x, y);
+                if (t == null) continue;
+                Block overlay = t.overlay();
+                if (overlay instanceof OreBlock) {
+                    Item oreItem = getItemFromOre((OreBlock) overlay);
+                    if (oreItem == item) count++;
                 }
             }
         }
-
-        if (bestDrillX == -1) return null;
-
-        IntSeq path = findPathAStar(bestConveyorX, bestConveyorY, core, reservedTiles);
-        if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) return null;
-
-        return new DrillPlan(
-            bestDrillX, bestDrillY,
-            bestConveyorX, bestConveyorY,
-            bestDrill, deposit.item,
-            path, deposit.key
-        );
+        return count;
     }
 
     private static Drill findBestDrillForItem(Item item) {
@@ -450,7 +461,7 @@ public final class KryptosSmartDrill {
         return null;
     }
 
-    /** Like canPlaceDrill(x, y, size, item), but also rejects tiles already reserved by a drill placed earlier in the same tiling pass (see tileDeposit). */
+    /** Checks a drill footprint is placeable, also rejecting tiles already reserved by a drill placed earlier in the same tiling pass (see tileDeposit). */
     private static boolean canPlaceDrill(int x, int y, int size, IntSet reservedTiles) {
         int half = size / 2;
         for (int dx = -half; dx <= half; dx++) {
@@ -467,47 +478,7 @@ public final class KryptosSmartDrill {
         return true;
     }
 
-    /** Like countOreCovered(cx, cy, size, item), but only counts ore tiles not already marked covered by an earlier drill in the same tiling pass (see tileDeposit). */
-    private static int countNewOreCovered(int cx, int cy, int size, Item item, IntSet coveredOre) {
-        int count = 0;
-        int half = size / 2;
-        int range = half + 1;
-
-        for (int dx = -range; dx <= range; dx++) {
-            for (int dy = -range; dy <= range; dy++) {
-                if (dx * dx + dy * dy > range * range) continue;
-                int x = cx + dx;
-                int y = cy + dy;
-                if (x < 0 || y < 0 || x >= world.width() || y >= world.height()) continue;
-                if (coveredOre.contains(Point2.pack(x, y))) continue;
-                Tile t = world.tile(x, y);
-                if (t != null) {
-                    Block overlay = t.overlay();
-                    if (overlay instanceof OreBlock) {
-                        OreBlock ore = (OreBlock) overlay;
-                        Item oreItem = getItemFromOre(ore);
-                        if (oreItem == item) count++;
-                    }
-                }
-            }
-        }
-        return count;
-    }
-
-    private static boolean canPlaceDrill(int x, int y, int size, Item item) {
-        int half = size / 2;
-        for (int dx = -half; dx <= half; dx++) {
-            for (int dy = -half; dy <= half; dy++) {
-                Tile t = world.tile(x + dx, y + dy);
-                if (t == null) return false;
-                if (t.block() != Blocks.air && !(t.block() instanceof OreBlock)) return false;
-                if (t.floor().isLiquid) return false;
-                if (t.build != null && !(t.build.block instanceof OreBlock)) return false;
-            }
-        }
-        return true;
-    }
-
+    /** Counts nearby ore tiles of `item` within a drill-sized radius -- used for DrillPlan's logged coverage count. */
     private static int countOreCovered(int cx, int cy, int size, Item item) {
         int count = 0;
         int half = size / 2;
