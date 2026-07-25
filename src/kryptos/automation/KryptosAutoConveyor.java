@@ -60,6 +60,14 @@ public final class KryptosAutoConveyor {
     private static final int[] DX4 = {1, 0, -1, 0};
     private static final int[] DY4 = {0, 1, 0, -1};
 
+    // Same shape as KryptosSmartDrill.State -- see there for what each value
+    // means. Kept as a separate enum (not shared) since the two modules'
+    // states must never be conflated or influence each other.
+    public enum State { IDLE, SCANNING, BUILDING }
+    private static State state = State.IDLE;
+
+    public static State state() { return state; }
+
     private static float lastScanTime = -SCAN_INTERVAL_TICKS;
 
     // Drills we've already handled (either successfully connected, or tried
@@ -114,22 +122,36 @@ public final class KryptosAutoConveyor {
 
     private static void update() {
         if (!Vars.state.isGame()) return;
-        if (!KryptosHud.autoplay || !KryptosAutomationPanel.autoConveyor) return;
+        if (!KryptosHud.autoplay || !KryptosAutomationPanel.autoConveyor) {
+            state = State.IDLE;
+            return;
+        }
         if (Vars.player == null) return;
 
         ensureHelper();
-        if (helperUnit == null) return;
+        if (helperUnit == null) {
+            state = State.IDLE;
+            return;
+        }
 
         float now = Time.time;
-        if (now - lastScanTime < SCAN_INTERVAL_TICKS) return;
+        if (now - lastScanTime < SCAN_INTERVAL_TICKS) {
+            state = helperUnit.buildPlan() != null ? State.BUILDING : State.IDLE;
+            return;
+        }
         lastScanTime = now;
+        state = State.SCANNING;
 
         try {
             scanAndBuild();
         } catch (Throwable t) {
             Log.err("[Kryptos] AutoConveyor scan failed, disabling module to avoid repeat crashes", t);
             KryptosAutomationPanel.autoConveyor = false;
+            state = State.IDLE;
+            return;
         }
+
+        state = helperUnit.buildPlan() != null ? State.BUILDING : State.IDLE;
     }
 
     private static void scanAndBuild() {
@@ -159,6 +181,7 @@ public final class KryptosAutoConveyor {
 
         int queuedThisCycle = 0;
         int attemptsThisCycle = 0;
+        IntSet reservedTiles = new IntSet();
 
         for (Building drill : candidates) {
             if (queuedThisCycle >= MAX_DRILLS_PER_CYCLE) break;
@@ -166,7 +189,7 @@ public final class KryptosAutoConveyor {
 
             int key = Point2.pack(drill.tile.x, drill.tile.y);
 
-            Tile startTile = findBestConveyorTile(drill.tile.x, drill.tile.y, drill.block.size, coreX, coreY);
+            Tile startTile = findBestConveyorTile(drill.tile.x, drill.tile.y, drill.block.size, coreX, coreY, reservedTiles);
             if (startTile == null) {
                 servedDrills.add(key);
                 continue;
@@ -179,7 +202,7 @@ public final class KryptosAutoConveyor {
             }
 
             attemptsThisCycle++;
-            IntSeq path = findPathAStar(startTile.x, startTile.y, core, w, h);
+            IntSeq path = findPathAStar(startTile.x, startTile.y, core, w, h, true, reservedTiles);
             if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) {
                 servedDrills.add(key);
                 continue;
@@ -187,6 +210,9 @@ public final class KryptosAutoConveyor {
 
             serveDrillPath(drill, key, path, core);
             queuedThisCycle++;
+            for (int i = 0; i < path.size; i++) {
+                reservedTiles.add(path.items[i]);
+            }
         }
     }
 
@@ -194,7 +220,7 @@ public final class KryptosAutoConveyor {
         return Math.abs(b.tile.x - coreX) + Math.abs(b.tile.y - coreY);
     }
 
-    private static Tile findBestConveyorTile(int drillX, int drillY, int drillSize, int coreX, int coreY) {
+    private static Tile findBestConveyorTile(int drillX, int drillY, int drillSize, int coreX, int coreY, IntSet reservedTiles) {
         int half = drillSize / 2;
         Tile best = null;
         int bestDist = Integer.MAX_VALUE;
@@ -204,6 +230,7 @@ public final class KryptosAutoConveyor {
             int cy = drillY + DY4[dir] * (half + 1);
 
             if (cx < 0 || cy < 0 || cx >= world.width() || cy >= world.height()) continue;
+            if (reservedTiles.contains(Point2.pack(cx, cy))) continue;
 
             Tile t = world.tile(cx, cy);
             if (t == null) continue;
@@ -219,11 +246,11 @@ public final class KryptosAutoConveyor {
         return best;
     }
 
-    private static IntSeq findPathAStar(int startX, int startY, Building core, int w, int h) {
-        return findPathAStar(startX, startY, core, w, h, true);
+    private static IntSeq findPathAStar(int startX, int startY, Building core, int w, int h, IntSet reservedTiles) {
+        return findPathAStar(startX, startY, core, w, h, true, reservedTiles);
     }
 
-    private static IntSeq findPathAStar(int startX, int startY, Building core, int w, int h, boolean allowBridge) {
+    private static IntSeq findPathAStar(int startX, int startY, Building core, int w, int h, boolean allowBridge, IntSet reservedTiles) {
         int startIdx = startY * w + startX;
         int coreX = core.tile.x;
         int coreY = core.tile.y;
@@ -268,6 +295,11 @@ public final class KryptosAutoConveyor {
 
                 int nIdx = ny * w + nx;
                 if (closed[nIdx]) continue;
+                // See KryptosSmartDrill's findPathAStar for why this guard
+                // exists -- same reasoning, applied here so two drills
+                // served in the same cycle never cross belt paths with
+                // conflicting rotations.
+                if (reservedTiles.contains(nIdx)) continue;
 
                 Tile t = world.tile(nx, ny);
                 if (!isConveyorWalkable(t)) continue;
@@ -284,21 +316,22 @@ public final class KryptosAutoConveyor {
         }
 
         if (goalIdx == -1) {
-            return allowBridge ? tryBridgePath(startX, startY, core, w, h) : null;
+            return allowBridge ? tryBridgePath(startX, startY, core, w, h, reservedTiles) : null;
         }
 
         return reconstructPath(prev, goalIdx, w);
     }
 
-    private static IntSeq tryBridgePath(int startX, int startY, Building core, int w, int h) {
+    private static IntSeq tryBridgePath(int startX, int startY, Building core, int w, int h, IntSet reservedTiles) {
         for (int dir = 0; dir < 4; dir++) {
             for (int len = 2; len <= MAX_BRIDGE_LENGTH; len++) {
                 int bx = startX + DX4[dir] * len;
                 int by = startY + DY4[dir] * len;
                 if (bx < 0 || by < 0 || bx >= w || by >= h) break;
+                if (reservedTiles.contains(Point2.pack(bx, by))) continue;
 
                 if (isConveyorWalkable(world.tile(bx, by))) {
-                    IntSeq path = findPathAStar(bx, by, core, w, h, false);
+                    IntSeq path = findPathAStar(bx, by, core, w, h, false, reservedTiles);
                     if (path != null && path.size > 0) {
                         IntSeq bridgePath = new IntSeq();
                         for (int l = 1; l <= len; l++) {
