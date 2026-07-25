@@ -354,7 +354,7 @@ public final class KryptosAutoConveyor {
                 // exists -- same reasoning, applied here so two drills
                 // served in the same cycle never cross belt paths with
                 // conflicting rotations.
-                if (reservedTiles.contains(nIdx)) continue;
+                if (reservedTiles.contains(Point2.pack(nx, ny))) continue;
 
                 Tile t = world.tile(nx, ny);
                 if (!isConveyorWalkable(t)) continue;
