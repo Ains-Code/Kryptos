@@ -7,11 +7,11 @@ import arc.struct.IntSet;
 import arc.struct.Seq;
 import arc.util.Log;
 import arc.util.Time;
+import kryptos.content.KryptosUnits;
 import kryptos.ui.KryptosAutomationPanel;
 import kryptos.ui.KryptosHud;
 import mindustry.Vars;
 import mindustry.content.Blocks;
-import mindustry.content.Items;
 import mindustry.entities.units.BuildPlan;
 import mindustry.game.EventType.Trigger;
 import mindustry.game.EventType.WorldLoadEvent;
@@ -46,7 +46,11 @@ import static mindustry.Vars.world;
  */
 public final class KryptosAutoConveyor {
 
-    private static final float SCAN_INTERVAL_TICKS = 60f * 10f;
+    // Was 10s -- with a drill scan now potentially placing several drills at
+    // once (see KryptosSmartDrill's cluster-tiling), a 10s gap left new
+    // drills sitting unconnected for a while and made the AutoConveyor drone
+    // look frozen/idle in the meantime. Matches SmartDrill's cadence instead.
+    private static final float SCAN_INTERVAL_TICKS = 60f * 5f;
     private static final int MAX_DRILLS_PER_CYCLE = 3;
     private static final int MAX_PATH_ATTEMPTS_PER_CYCLE = 8;
     private static final int MAX_PATH_SEARCH_TILES = 20000;
@@ -85,7 +89,7 @@ public final class KryptosAutoConveyor {
 
     private static void ensureHelper() {
         if (Vars.player == null) return;
-        helperUnit = KryptosBuilderUnits.getOrSpawn(helperUnit, Vars.player.team());
+        helperUnit = KryptosBuilderUnits.getOrSpawn(helperUnit, Vars.player.team(), KryptosUnits.builder);
     }
 
     public static int servedCount() {
@@ -399,19 +403,11 @@ public final class KryptosAutoConveyor {
         Block fieldMatch = KryptosFieldTier.matchExistingConveyor(Vars.player.team());
         if (fieldMatch != null) return fieldMatch;
 
-        if (index == pathLength - 1) {
-            return Blocks.conveyor;
-        }
-
-        if (Vars.state.rules.infiniteResources || hasTitanium()) {
-            return Blocks.titaniumConveyor;
-        }
-
-        return Blocks.conveyor;
-    }
-
-    private static boolean hasTitanium() {
-        return Vars.player.team().core().items.get(Items.titanium) > 50;
+        // No belts on the field yet to match tier against -- pick the best
+        // unlocked/affordable conveyor available (Plastanium, Armored, etc.),
+        // not just a hardcoded titanium-or-basic choice.
+        Block best = KryptosFieldTier.bestUnlockedConveyor(Vars.player.team());
+        return best != null ? best : Blocks.conveyor;
     }
 
     private static int rotationFor(int dx, int dy) {
