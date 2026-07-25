@@ -107,6 +107,7 @@ public final class KryptosAutoConveyor {
     private static void reset() {
         lastScanTime = -SCAN_INTERVAL_TICKS;
         servedDrills.clear();
+        upgradeQueued.clear();
         helperUnit = null;
         // Kills any drone left over from a previous session/save that our
         // static reference above doesn't know about -- see
@@ -213,6 +214,60 @@ public final class KryptosAutoConveyor {
             for (int i = 0; i < path.size; i++) {
                 reservedTiles.add(path.items[i]);
             }
+        }
+
+        // Runs every cycle regardless of whether any drill needed serving --
+        // Smart Drill always builds a drill together with its own belts, so
+        // in practice AutoConveyor finds zero unserved drills most of the
+        // time and would otherwise just park at the core forever with
+        // nothing to do (the "one drone doesn't move" symptom). This gives
+        // it real, ongoing, deterministic work: replacing any belt that's
+        // below the best currently-unlocked tier once you've researched
+        // something better, same tier-matching logic Smart Drill uses for
+        // new belts (see KryptosFieldTier), just applied retroactively.
+        upgradeBelts(team, core);
+    }
+
+    private static final int MAX_UPGRADES_PER_CYCLE = 4;
+
+    // Tiles already queued for a tier upgrade -- prevents re-queuing the same
+    // tile every single cycle while the drone is still en route to build it
+    // (the replacement doesn't take effect in the world until the drone
+    // actually gets there and builds it, same reasoning as servedDrills).
+    private static final IntSet upgradeQueued = new IntSet();
+
+    private static void upgradeBelts(Team team, Building core) {
+        Block best = KryptosFieldTier.bestUnlockedConveyor(team);
+        if (!(best instanceof Conveyor bestConveyor)) return;
+
+        Unit unit = helperUnit;
+        if (unit == null) return;
+
+        Seq<Building> belts = new Seq<>();
+        Groups.build.each(b -> {
+            if (b.team != team) return;
+            if (!(b.block instanceof Conveyor)) return;
+            if (b.block == best) return; // already best tier
+            belts.add(b);
+        });
+
+        belts.sort((a, b) -> Integer.compare(
+            distToCore(a, core.tile.x, core.tile.y),
+            distToCore(b, core.tile.x, core.tile.y)));
+
+        int upgraded = 0;
+        for (Building belt : belts) {
+            if (upgraded >= MAX_UPGRADES_PER_CYCLE) break;
+
+            Conveyor current = (Conveyor) belt.block;
+            if (current.speed >= bestConveyor.speed) continue; // not actually worse, leave it
+
+            int key = Point2.pack(belt.tile.x, belt.tile.y);
+            if (upgradeQueued.contains(key)) continue;
+
+            unit.addBuild(new BuildPlan(belt.tile.x, belt.tile.y, belt.rotation, best));
+            upgradeQueued.add(key);
+            upgraded++;
         }
     }
 
