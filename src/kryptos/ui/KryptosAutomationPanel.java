@@ -87,7 +87,8 @@ public class KryptosAutomationPanel {
         statusLabel = new Label("");
         statusLabel.setColor(STATUS_COLOR);
         statusLabel.update(() -> statusLabel.setText(
-            "Conveyor: " + KryptosAutoConveyor.servedCount() + " | Drill: active"
+            "Conveyor: " + KryptosAutoConveyor.servedCount() + " [" + KryptosAutoConveyor.state() + "]"
+            + " | Drill [" + KryptosSmartDrill.state() + "]"
         ));
         content.add(statusLabel).left().padTop(4f);
 
@@ -161,4 +162,3 @@ public class KryptosAutomationPanel {
         });
     }
 }
-
