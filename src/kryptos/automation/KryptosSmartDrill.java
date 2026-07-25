@@ -50,6 +50,17 @@ public final class KryptosSmartDrill {
     private static final int[] DX4 = {1, 0, -1, 0};
     private static final int[] DY4 = {0, 1, 0, -1};
 
+    // Explicit state, updated only at the points below -- never set randomly,
+    // never inferred. IDLE: toggle off, or toggle on with nothing queued and
+    // no scan due. SCANNING: actively inside scanAndManageDrills() this tick.
+    // BUILDING: toggle on, not scanning this tick, but the drone still has
+    // queued build plans left to execute. Exposed read-only so UI/logging
+    // can show what each agent is actually doing right now.
+    public enum State { IDLE, SCANNING, BUILDING }
+    private static State state = State.IDLE;
+
+    public static State state() { return state; }
+
     private static float lastScanTime = -SCAN_INTERVAL_TICKS;
 
     // The drone that actually flies out and builds -- spawned the moment
@@ -106,22 +117,36 @@ public final class KryptosSmartDrill {
                 KryptosHud.autoplay, KryptosAutomationPanel.autoSmartDrill, helperUnit);
         }
 
-        if (!KryptosHud.autoplay || !KryptosAutomationPanel.autoSmartDrill) return;
+        if (!KryptosHud.autoplay || !KryptosAutomationPanel.autoSmartDrill) {
+            state = State.IDLE;
+            return;
+        }
         if (Vars.player == null) return;
 
         ensureHelper();
-        if (helperUnit == null) return;
+        if (helperUnit == null) {
+            state = State.IDLE;
+            return;
+        }
 
         float now = Time.time;
-        if (now - lastScanTime < SCAN_INTERVAL_TICKS) return;
+        if (now - lastScanTime < SCAN_INTERVAL_TICKS) {
+            state = helperUnit.buildPlan() != null ? State.BUILDING : State.IDLE;
+            return;
+        }
         lastScanTime = now;
+        state = State.SCANNING;
 
         try {
             scanAndManageDrills();
         } catch (Throwable t) {
             Log.err("[Kryptos] SmartDrill scan failed, disabling module to avoid repeat crashes", t);
             KryptosAutomationPanel.autoSmartDrill = false;
+            state = State.IDLE;
+            return;
         }
+
+        state = helperUnit.buildPlan() != null ? State.BUILDING : State.IDLE;
     }
 
     private static void scanAndManageDrills() {
@@ -309,6 +334,9 @@ public final class KryptosSmartDrill {
                     coveredOre.add(Point2.pack(plan.drillX + dx, plan.drillY + dy));
                 }
             }
+            for (int i = 0; i < plan.path.size; i++) {
+                reservedTiles.add(plan.path.items[i]);
+            }
         }
 
         return result;
@@ -342,7 +370,7 @@ public final class KryptosSmartDrill {
                     int covered = countNewOreCovered(drillX, drillY, drillSize, deposit.item, coveredOre);
                     if (covered <= 0) continue;
 
-                    Tile conveyorTile = findBestConveyorTile(drillX, drillY, drillSize, coreX, coreY);
+                    Tile conveyorTile = findBestConveyorTile(drillX, drillY, drillSize, coreX, coreY, reservedTiles);
                     if (conveyorTile == null) continue;
 
                     if (covered > bestCovered) {
@@ -358,7 +386,7 @@ public final class KryptosSmartDrill {
 
         if (bestDrillX == -1) return null;
 
-        IntSeq path = findPathAStar(bestConveyorX, bestConveyorY, core);
+        IntSeq path = findPathAStar(bestConveyorX, bestConveyorY, core, reservedTiles);
         if (path == null || path.size == 0 || path.size > MAX_PATH_LENGTH) return null;
 
         return new DrillPlan(
@@ -505,7 +533,7 @@ public final class KryptosSmartDrill {
         return count;
     }
 
-    private static Tile findBestConveyorTile(int drillX, int drillY, int drillSize, int coreX, int coreY) {
+    private static Tile findBestConveyorTile(int drillX, int drillY, int drillSize, int coreX, int coreY, IntSet reservedTiles) {
         int half = drillSize / 2;
         Tile best = null;
         int bestDist = Integer.MAX_VALUE;
@@ -515,6 +543,7 @@ public final class KryptosSmartDrill {
             int cy = drillY + DY4[dir] * (half + 1);
 
             if (cx < 0 || cy < 0 || cx >= world.width() || cy >= world.height()) continue;
+            if (reservedTiles.contains(Point2.pack(cx, cy))) continue;
 
             Tile t = world.tile(cx, cy);
             if (t == null) continue;
@@ -530,7 +559,7 @@ public final class KryptosSmartDrill {
         return best;
     }
 
-    private static IntSeq findPathAStar(int startX, int startY, Building core) {
+    private static IntSeq findPathAStar(int startX, int startY, Building core, IntSet reservedTiles) {
         int w = world.width();
         int h = world.height();
         int coreX = core.tile.x;
@@ -578,6 +607,16 @@ public final class KryptosSmartDrill {
 
                 int nIdx = ny * w + nx;
                 if (closed[nIdx]) continue;
+                // Blocks routing through a sibling drill's footprint or belt
+                // path from the same tiling pass -- that tile is only empty
+                // air in the CURRENT world state because nothing has been
+                // built yet, not because it's actually free. Without this,
+                // the second/third drill in a cluster could plan a belt
+                // straight across the first drill's not-yet-built footprint;
+                // the plan then gets silently dropped by KryptosDroneAI the
+                // moment the drone reaches it and finds the tile occupied,
+                // which is what read as "random" drone behavior.
+                if (reservedTiles.contains(nIdx)) continue;
 
                 Tile t = world.tile(nx, ny);
                 if (!isConveyorWalkable(t)) continue;
