@@ -7,6 +7,8 @@ import arc.util.Time;
 import kryptos.content.KryptosUnits;
 import kryptos.ui.KryptosAutomationPanel;
 import kryptos.ui.KryptosHud;
+import kryptos.world.KryptosDefenseGeometry;
+import kryptos.world.KryptosDefenseGeometry.Style;
 import mindustry.Vars;
 import mindustry.content.Blocks;
 import mindustry.entities.units.BuildPlan;
@@ -50,6 +52,16 @@ import static mindustry.Vars.world;
  * construction partway through, the shield is already up rather than a
  * half-built, exposed turret line with nothing in front of it yet.
  *
+ * Line width, turret density, and per-cycle build budget are no longer one
+ * fixed shape for every spawn -- each spawn's approach terrain is classified
+ * by {@link kryptos.world.KryptosDefenseGeometry}, which traces the same
+ * ground flowfield the enemy AI itself follows to tell whether that spawn's
+ * path to the core is a natural chokepoint (keep the line narrow and dense)
+ * or open ground (widen it and add more turrets, since there's no terrain
+ * doing the concentrating for us). See {@link #lineHalfWidthFor},
+ * {@link #turretEveryFor}, and {@link #maxBuildsFor} for the per-style
+ * values.
+ *
  * One drone per spawn point, not one shared drone visiting every spawn in
  * turn: {@link #helperUnits} always has exactly as many drones as there are
  * currently-known spawn points (index i is dedicated to spawner.getSpawns()'s
@@ -79,20 +91,60 @@ public final class KryptosPerimeterDefense {
     // (rounding/line-width could otherwise put a corner tile just inside it).
     private static final int SAFETY_MARGIN_TILES = 3;
 
-    // Total tiles the defense line spans, centered on the spawn-to-core axis.
-    private static final int LINE_HALF_WIDTH = 4;
+    // Total tiles the defense line spans, centered on the spawn-to-core
+    // axis, per classified terrain Style. CHOKEPOINT keeps the original
+    // width -- enemies are naturally forced tight there, so a narrow, dense
+    // line is enough. HYBRID and OPEN widen it to cover a broader approach
+    // front on sectors where the terrain doesn't do that funneling for us.
+    private static final int LINE_HALF_WIDTH_CHOKEPOINT = 4;
+    private static final int LINE_HALF_WIDTH_HYBRID = 6;
+    private static final int LINE_HALF_WIDTH_OPEN = 9;
 
-    // Every 3rd position is a turret instead of a wall.
-    private static final int TURRET_EVERY = 3;
+    // Every Nth position is a turret instead of a wall. Open ground gets a
+    // denser ratio -- there's no natural bottleneck concentrating enemies
+    // onto a couple of turrets' worth of range, so more of the line needs
+    // to be able to shoot at once.
+    private static final int TURRET_EVERY_CHOKEPOINT = 3;
+    private static final int TURRET_EVERY_HYBRID = 3;
+    private static final int TURRET_EVERY_OPEN = 2;
 
     // Caps how many BuildPlans get queued PER SPAWN POINT in a single scan --
     // per-spawn now that each has its own dedicated drone, so one spawn's
     // line can't eat the whole cycle's budget and starve every other spawn's
     // drone out of getting any work queued this round.
-    // Raised from 4 -- there are now 2 layers (outer wall + inner
-    // turret/wall) to cover per spawn instead of 1, so the old cap would've
-    // meant roughly twice as many scan cycles to finish one spawn's line.
-    private static final int MAX_BUILDS_PER_CYCLE_PER_SPAWN = 8;
+    // OPEN sectors have a much longer line to fill than CHOKEPOINT's, so
+    // they get a higher cap -- otherwise they'd take proportionally many
+    // more scan cycles (10s each) to finish than a narrow line would.
+    private static final int MAX_BUILDS_CHOKEPOINT = 8;
+    private static final int MAX_BUILDS_HYBRID = 8;
+    private static final int MAX_BUILDS_OPEN = 12;
+
+    /** Half-width of the defense line for a given classified terrain style. UNKNOWN falls back to CHOKEPOINT -- the original, already-shipped shape -- rather than guessing wide. */
+    private static int lineHalfWidthFor(Style style) {
+        return switch (style) {
+            case OPEN -> LINE_HALF_WIDTH_OPEN;
+            case HYBRID -> LINE_HALF_WIDTH_HYBRID;
+            case CHOKEPOINT, UNKNOWN -> LINE_HALF_WIDTH_CHOKEPOINT;
+        };
+    }
+
+    /** Turret-to-wall ratio (1-in-N) for a given classified terrain style. */
+    private static int turretEveryFor(Style style) {
+        return switch (style) {
+            case OPEN -> TURRET_EVERY_OPEN;
+            case HYBRID -> TURRET_EVERY_HYBRID;
+            case CHOKEPOINT, UNKNOWN -> TURRET_EVERY_CHOKEPOINT;
+        };
+    }
+
+    /** Per-scan BuildPlan budget for a given classified terrain style. */
+    private static int maxBuildsFor(Style style) {
+        return switch (style) {
+            case OPEN -> MAX_BUILDS_OPEN;
+            case HYBRID -> MAX_BUILDS_HYBRID;
+            case CHOKEPOINT, UNKNOWN -> MAX_BUILDS_CHOKEPOINT;
+        };
+    }
 
     // helperUnits.get(i) is dedicated to spawner.getSpawns().get(i). Resized
     // to match the current spawn count every scan (see ensureHelpers()).
@@ -219,6 +271,11 @@ public final class KryptosPerimeterDefense {
             float px = -dy;
             float py = dx;
 
+            Style style = KryptosDefenseGeometry.classify(spawn, core.tile);
+            int halfWidth = lineHalfWidthFor(style);
+            int turretEvery = turretEveryFor(style);
+            int maxBuildsThisSpawn = maxBuildsFor(style);
+
             int queuedForThisSpawn = 0;
 
             // Pass 1: outer wall row. Queued (and therefore built by the
@@ -229,8 +286,8 @@ public final class KryptosPerimeterDefense {
                 float centerX = spawn.x + dx * outerRadiusTiles;
                 float centerY = spawn.y + dy * outerRadiusTiles;
 
-                for (int offset = -LINE_HALF_WIDTH; offset <= LINE_HALF_WIDTH; offset++) {
-                    if (queuedForThisSpawn >= MAX_BUILDS_PER_CYCLE_PER_SPAWN) break;
+                for (int offset = -halfWidth; offset <= halfWidth; offset++) {
+                    if (queuedForThisSpawn >= maxBuildsThisSpawn) break;
 
                     int lx = Math.round(centerX + px * offset);
                     int ly = Math.round(centerY + py * offset);
@@ -250,13 +307,13 @@ public final class KryptosPerimeterDefense {
                 float centerX = spawn.x + dx * innerRadiusTiles;
                 float centerY = spawn.y + dy * innerRadiusTiles;
 
-                for (int offset = -LINE_HALF_WIDTH; offset <= LINE_HALF_WIDTH; offset++) {
-                    if (queuedForThisSpawn >= MAX_BUILDS_PER_CYCLE_PER_SPAWN) break;
+                for (int offset = -halfWidth; offset <= halfWidth; offset++) {
+                    if (queuedForThisSpawn >= maxBuildsThisSpawn) break;
 
                     int lx = Math.round(centerX + px * offset);
                     int ly = Math.round(centerY + py * offset);
 
-                    boolean wantTurret = (offset % TURRET_EVERY == 0) && turretType != null;
+                    boolean wantTurret = (offset % turretEvery == 0) && turretType != null;
                     Block wanted = wantTurret ? turretType : wallType;
                     if (wanted == null) continue;
 
@@ -271,6 +328,11 @@ public final class KryptosPerimeterDefense {
             }
 
             totalQueued += queuedForThisSpawn;
+
+            if (queuedForThisSpawn > 0) {
+                Log.info("[Kryptos] PerimeterDefense: spawn #@ classified @ (half-width @, turret-every @), queued @ placement(s)",
+                    spawnIndex, style, halfWidth, turretEvery, queuedForThisSpawn);
+            }
         }
 
         if (totalQueued > 0) {
