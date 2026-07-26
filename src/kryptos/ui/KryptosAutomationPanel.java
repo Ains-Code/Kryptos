@@ -11,11 +11,12 @@ import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.Label;
 import arc.scene.ui.layout.Table;
 import arc.util.Log;
-import kryptos.automation.KryptosAutoConveyor;
 import kryptos.automation.KryptosLogicDeploy;
+import kryptos.automation.KryptosPerimeterDefense;
 import kryptos.automation.KryptosSmartDrill;
 import mindustry.content.Blocks;
 import mindustry.content.Items;
+import mindustry.gen.Icon;
 import mindustry.ui.Styles;
 
 import static mindustry.Vars.ui;
@@ -24,9 +25,9 @@ import static mindustry.Vars.ui;
  * The "many different automations" panel requested alongside Autoplay --
  * only visible while {@link KryptosHud#autoplay} is on (see the wiring in
  * {@link KryptosHud#build()}). Each automation gets one toggle row here;
- * this module ships with Auto Conveyor ({@link KryptosAutoConveyor}) and
- * Smart Drill ({@link KryptosSmartDrill}), and is built so more can be
- * added the same way later.
+ * this module ships with Smart Drill ({@link KryptosSmartDrill}) and
+ * Perimeter Defense ({@link KryptosPerimeterDefense}), and is built so more
+ * can be added the same way later.
  *
  * Follows the same draggable-panel-with-remembered-position pattern as
  * {@link KryptosTeamPanel}.
@@ -42,11 +43,19 @@ public class KryptosAutomationPanel {
     private static final float HANDLE_HEIGHT = 10f;
     private static final float DRAG_THRESHOLD = 6f;
 
-    /** Master switch for the auto-conveyor module; read by {@link KryptosAutoConveyor}. */
-    public static boolean autoConveyor = false;
-
-    /** Master switch for the smart drill module; read by {@link KryptosSmartDrill}. */
+    /**
+     * Master switch for the smart drill module; read by {@link KryptosSmartDrill}.
+     * This is a faithful port of Ains-Code/mod-mindustry's SmartDrillFeature
+     * now (tap-and-hold an ore tile -> pick direction -> pick drill -> it
+     * queues BuildPlans onto whatever unit the player is directly
+     * controlling), not the earlier autonomous-scan design. This toggle just
+     * gates whether the hold-detection in KryptosSmartDrill.updateHold() is
+     * listening at all -- there's no separate "scan" step to kick off.
+     */
     public static boolean autoSmartDrill = false;
+
+    /** Master switch for the perimeter defense module; read by {@link KryptosPerimeterDefense}. */
+    public static boolean autoPerimeterDefense = false;
 
     private static Table container;
     private static Table content;
@@ -58,19 +67,20 @@ public class KryptosAutomationPanel {
 
         content.add("Automation").color(LABEL_COLOR).left().padBottom(6f).row();
 
-        KryptosHud.addToggle(content, new TextureRegionDrawable(Blocks.conveyor.uiIcon),
-                "Auto Conveyor", () -> autoConveyor, b -> {
-                    autoConveyor = b;
-                    Log.info("[Kryptos] Auto Conveyor toggle -> @", b);
-                    if (b) KryptosAutoConveyor.requestImmediateScan();
-                });
-        content.row();
-
         KryptosHud.addToggle(content, new TextureRegionDrawable(Items.titanium.uiIcon),
                 "Smart Drill", () -> autoSmartDrill, b -> {
                     autoSmartDrill = b;
                     Log.info("[Kryptos] Smart Drill toggle -> @", b);
-                    if (b) KryptosSmartDrill.requestImmediateScan();
+                });
+        content.button(Icon.settings, Styles.emptyi, () -> new KryptosSmartDrillSettingDialog().show())
+                .size(32f).pad(4f).tooltip("Smart Drill settings (max tiles / fill entire ore patch)");
+        content.row();
+
+        KryptosHud.addToggle(content, new TextureRegionDrawable(Blocks.duo.uiIcon),
+                "Perimeter Defense", () -> autoPerimeterDefense, b -> {
+                    autoPerimeterDefense = b;
+                    Log.info("[Kryptos] Perimeter Defense toggle -> @", b);
+                    if (b) KryptosPerimeterDefense.requestImmediateScan();
                 });
         content.row();
 
@@ -87,8 +97,8 @@ public class KryptosAutomationPanel {
         statusLabel = new Label("");
         statusLabel.setColor(STATUS_COLOR);
         statusLabel.update(() -> statusLabel.setText(
-            "Conveyor: " + KryptosAutoConveyor.servedCount() + " [" + KryptosAutoConveyor.state() + "]"
-            + " | Drill [" + KryptosSmartDrill.state() + "]"
+            "Drill [" + KryptosSmartDrill.state() + "]"
+            + " | Defense [" + KryptosPerimeterDefense.state() + "]"
         ));
         content.add(statusLabel).left().padTop(4f);
 
