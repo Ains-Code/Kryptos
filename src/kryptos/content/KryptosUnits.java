@@ -4,28 +4,28 @@ import mindustry.ai.UnitCommand;
 import mindustry.type.UnitType;
 
 /**
- * Content-side unit definitions for Kryptos. Two "builder drone" types --
- * {@link #builder} for {@link kryptos.automation.KryptosAutoConveyor} and
- * {@link #smartDrillBuilder} for {@link kryptos.automation.KryptosSmartDrill}
- * -- each module spawns (and reuses) its own instead of forcing the player's
- * own unit to fly out and build things.
+ * Content-side unit definitions for Kryptos. Just one "builder drone" type
+ * now -- {@link #defenseBuilder}, used by
+ * {@link kryptos.automation.KryptosPerimeterDefense} (one spawned per
+ * detected enemy spawn point, see KryptosPerimeterDefense's per-spawn drone
+ * scaling).
  *
- * They're functionally identical, split into two types only so the two
- * modules' drones are visually distinguishable in-game -- previously both
- * used the exact same placeholder sprite, so there was no way to tell which
- * drone belonged to which module just by looking at it.
+ * KryptosAutoConveyor has been removed, and KryptosSmartDrill no longer uses
+ * a dedicated drone at all -- it now queues its BuildPlans onto whatever unit
+ * the player is directly controlling instead (matching mod-mindustry's
+ * SmartDrillFeature, which does the same via Vars.player.unit().addBuild()).
+ * The old {@code builder} and {@code smartDrillBuilder} types those two used
+ * are gone; their placeholder sprite files are left in sprites/units/ but are
+ * no longer referenced by any content.
  */
 public class KryptosUnits {
-    public static UnitType builder;
-    public static UnitType smartDrillBuilder;
+    public static UnitType defenseBuilder;
 
     public static void load() {
-        builder = new UnitType("kryptos-builder") {{
-            applyBuilderDroneStats(this);
-        }};
-
-        // Sprite: sprites/units/kryptos-smartdrill.png
-        smartDrillBuilder = new UnitType("kryptos-smartdrill") {{
+        // Sprite: sprites/units/kryptos-defense-builder.png -- currently just
+        // a copy of the kryptos-builder placeholder (no dedicated art yet).
+        // Swap the PNG later without touching this file.
+        defenseBuilder = new UnitType("kryptos-defense-builder") {{
             applyBuilderDroneStats(this);
         }};
     }
@@ -42,8 +42,8 @@ public class KryptosUnits {
         type.controlSelectGlobal = false;
         // Automation only -- the drone can never be selected or
         // commanded by the player via the RTS Command panel, so it can
-        // only ever do what KryptosSmartDrill/KryptosAutoConveyor
-        // explicitly queue on it (see KryptosDroneAI).
+        // only ever do what KryptosPerimeterDefense explicitly queues on
+        // it (see KryptosDroneAI).
         type.playerControllable = false;
 
         type.hitSize = 9f;
