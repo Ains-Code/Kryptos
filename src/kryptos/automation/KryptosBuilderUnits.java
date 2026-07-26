@@ -9,17 +9,20 @@ import mindustry.gen.Unit;
 import mindustry.type.UnitType;
 
 /**
- * Spawns and hands out the shared Kryptos builder drones for
- * {@link KryptosAutoConveyor} and {@link KryptosSmartDrill}. Each module owns
- * exactly one drone: spawned the moment its toggle is switched on, reused for
- * as long as it's alive, and quietly replaced if it dies. The two modules use
- * different {@link UnitType}s (see {@link KryptosUnits}) so their drones are
- * visually distinguishable in-game -- AutoConveyor uses the plain
- * kryptos-builder sprite, SmartDrill uses the kryptos-smartdrill sprite.
+ * Spawns and hands out Kryptos builder drones for
+ * {@link KryptosPerimeterDefense} -- one per detected enemy spawn point (see
+ * that class's per-spawn drone scaling). Each slot owns exactly one drone:
+ * spawned the moment it's needed, reused for as long as it's alive, and
+ * quietly replaced if it dies.
  *
- * Automation only -- the drone is always locked to {@link KryptosDroneAI}
- * and is never player-controllable (see {@code playerControllable = false}
- * on {@link KryptosUnits#builder}).
+ * KryptosAutoConveyor has been removed, and KryptosSmartDrill no longer uses
+ * a dedicated drone -- it now queues its BuildPlans onto whatever unit the
+ * player is directly controlling instead (matching mod-mindustry's
+ * SmartDrillFeature). This class is kept for PerimeterDefense's drones only.
+ *
+ * Automation only -- every drone here is always locked to
+ * {@link KryptosDroneAI} and is never player-controllable (see
+ * {@code playerControllable = false} on {@link KryptosUnits#defenseBuilder}).
  */
 public final class KryptosBuilderUnits {
 
@@ -59,21 +62,18 @@ public final class KryptosBuilderUnits {
     }
 
     /**
-     * Kills every existing drone of either type on load, no exceptions.
-     * Without this, a drone left over from a previous session/save (spawned
-     * before a fix existed, or orphaned when its module's static reference
-     * was reset) just sits in the world running whatever old/default
-     * behavior it had -- completely invisible to and unmanaged by the
-     * current code, since nothing ever calls getOrSpawn() on it while its
-     * module's toggle is off. That's the "there's already a drone even
-     * though I haven't turned anything on" symptom. Called from both
-     * modules' reset() on WorldLoadEvent, so the world always starts with
-     * zero drones and the next getOrSpawn() call is guaranteed to create a
-     * clean one.
+     * Kills every existing drone of our type on load, no exceptions. Without
+     * this, a drone left over from a previous session/save (spawned before a
+     * fix existed, or orphaned when the module's static reference was reset)
+     * just sits in the world running whatever old/default behavior it had --
+     * completely invisible to and unmanaged by the current code. Called from
+     * KryptosPerimeterDefense's reset() on WorldLoadEvent, so the world
+     * always starts with zero drones and the next getOrSpawn() call is
+     * guaranteed to create a clean one.
      */
     public static void killAll() {
         Groups.unit.each(u -> {
-            if (u.type == KryptosUnits.builder || u.type == KryptosUnits.smartDrillBuilder) u.kill();
+            if (u.type == KryptosUnits.defenseBuilder) u.kill();
         });
     }
 }
