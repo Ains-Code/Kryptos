@@ -27,9 +27,13 @@ import static mindustry.Vars.tilesize;
 import static mindustry.Vars.world;
 
 /**
- * Autonomously builds a defensive line (alternating turrets and walls) just
- * outside each ground spawn point's "drop zone" -- the circle drawn around
- * every spawn on the map/minimap.
+ * Autonomously builds a 2-layer defensive line just outside each ground
+ * spawn point's "drop zone" -- the circle drawn around every spawn on the
+ * map/minimap. Outer layer (closer to the spawn, hit first) is pure wall;
+ * inner layer (one tile further toward the core) is turret+wall, physically
+ * screened by the outer layer's wall body -- Mindustry turrets fire past a
+ * friendly wall in front of them just fine, so this keeps the turrets from
+ * taking direct hits while the wall in front absorbs them instead.
  *
  * IMPORTANT, verified against Mindustry's own WaveSpawner source: that circle
  * is not just a visual indicator. Every time a wave spawns, the game deals
@@ -41,6 +45,11 @@ import static mindustry.Vars.world;
  * player's core, forming a line the marching enemies have to pass through on
  * their way in -- a normal defensive kill-line, not a spawn wall.
  *
+ * Build order matters: the outer wall row is queued (and therefore built by
+ * the drone) entirely before the inner turret row. If a wave interrupts
+ * construction partway through, the shield is already up rather than a
+ * half-built, exposed turret line with nothing in front of it yet.
+ *
  * One drone per spawn point, not one shared drone visiting every spawn in
  * turn: {@link #helperUnits} always has exactly as many drones as there are
  * currently-known spawn points (index i is dedicated to spawner.getSpawns()'s
@@ -51,7 +60,7 @@ import static mindustry.Vars.world;
  *
  * Unlike SmartDrill's ore deposits, a defense line is never "done" for good
  * -- enemies can destroy sections of it. So instead of claiming a spawn
- * point once and never looking again, every scan re-checks the line's
+ * point once and never looking again, every scan re-checks both layers'
  * intended tiles and only queues BuildPlans for whichever ones are currently
  * missing/destroyed. This doubles as auto-repair for free.
  */
@@ -80,7 +89,10 @@ public final class KryptosPerimeterDefense {
     // per-spawn now that each has its own dedicated drone, so one spawn's
     // line can't eat the whole cycle's budget and starve every other spawn's
     // drone out of getting any work queued this round.
-    private static final int MAX_BUILDS_PER_CYCLE_PER_SPAWN = 4;
+    // Raised from 4 -- there are now 2 layers (outer wall + inner
+    // turret/wall) to cover per spawn instead of 1, so the old cap would've
+    // meant roughly twice as many scan cycles to finish one spawn's line.
+    private static final int MAX_BUILDS_PER_CYCLE_PER_SPAWN = 8;
 
     // helperUnits.get(i) is dedicated to spawner.getSpawns().get(i). Resized
     // to match the current spawn count every scan (see ensureHelpers()).
@@ -179,7 +191,14 @@ public final class KryptosPerimeterDefense {
         Block wallType = bestUnlockedWall(core);
         if (turretType == null && wallType == null) return;
 
-        float radiusTiles = Vars.state.rules.dropZoneRadius / tilesize + SAFETY_MARGIN_TILES;
+        // Outer row (closer to the spawn, hit first) is pure wall -- a
+        // shield with nothing valuable exposed on it. Inner row (one tile
+        // further toward the core) is where the turrets actually go,
+        // physically screened by the outer row's wall body sitting between
+        // them and the approaching enemies. Mindustry turrets can still fire
+        // past a friendly wall in front of them just fine.
+        float outerRadiusTiles = Vars.state.rules.dropZoneRadius / tilesize + SAFETY_MARGIN_TILES;
+        float innerRadiusTiles = outerRadiusTiles + 1f;
 
         int totalQueued = 0;
         Seq<Tile> spawns = spawner.getSpawns();
@@ -200,28 +219,55 @@ public final class KryptosPerimeterDefense {
             float px = -dy;
             float py = dx;
 
-            float centerX = spawn.x + dx * radiusTiles;
-            float centerY = spawn.y + dy * radiusTiles;
-
             int queuedForThisSpawn = 0;
 
-            for (int offset = -LINE_HALF_WIDTH; offset <= LINE_HALF_WIDTH; offset++) {
-                if (queuedForThisSpawn >= MAX_BUILDS_PER_CYCLE_PER_SPAWN) break;
+            // Pass 1: outer wall row. Queued (and therefore built by the
+            // drone) before anything in pass 2, so a wave that interrupts
+            // construction mid-way still finds a completed shield rather
+            // than a half-built, unprotected turret line.
+            if (wallType != null) {
+                float centerX = spawn.x + dx * outerRadiusTiles;
+                float centerY = spawn.y + dy * outerRadiusTiles;
 
-                int lx = Math.round(centerX + px * offset);
-                int ly = Math.round(centerY + py * offset);
+                for (int offset = -LINE_HALF_WIDTH; offset <= LINE_HALF_WIDTH; offset++) {
+                    if (queuedForThisSpawn >= MAX_BUILDS_PER_CYCLE_PER_SPAWN) break;
 
-                boolean wantTurret = (offset % TURRET_EVERY == 0) && turretType != null;
-                Block wanted = wantTurret ? turretType : wallType;
-                if (wanted == null) continue;
+                    int lx = Math.round(centerX + px * offset);
+                    int ly = Math.round(centerY + py * offset);
 
-                Tile tile = world.tile(lx, ly);
-                if (tile == null) continue;
-                if (tile.block() == wanted) continue; // already built, nothing to do
-                if (!isBuildable(tile)) continue; // occupied by something else, or ore we don't want to cover, or liquid
+                    Tile tile = world.tile(lx, ly);
+                    if (tile == null) continue;
+                    if (tile.block() == wallType) continue; // already built
+                    if (!isBuildable(tile)) continue;
 
-                drone.addBuild(new BuildPlan(lx, ly, 0, wanted));
-                queuedForThisSpawn++;
+                    drone.addBuild(new BuildPlan(lx, ly, 0, wallType));
+                    queuedForThisSpawn++;
+                }
+            }
+
+            // Pass 2: inner turret+wall row, screened by pass 1's wall.
+            {
+                float centerX = spawn.x + dx * innerRadiusTiles;
+                float centerY = spawn.y + dy * innerRadiusTiles;
+
+                for (int offset = -LINE_HALF_WIDTH; offset <= LINE_HALF_WIDTH; offset++) {
+                    if (queuedForThisSpawn >= MAX_BUILDS_PER_CYCLE_PER_SPAWN) break;
+
+                    int lx = Math.round(centerX + px * offset);
+                    int ly = Math.round(centerY + py * offset);
+
+                    boolean wantTurret = (offset % TURRET_EVERY == 0) && turretType != null;
+                    Block wanted = wantTurret ? turretType : wallType;
+                    if (wanted == null) continue;
+
+                    Tile tile = world.tile(lx, ly);
+                    if (tile == null) continue;
+                    if (tile.block() == wanted) continue;
+                    if (!isBuildable(tile)) continue;
+
+                    drone.addBuild(new BuildPlan(lx, ly, 0, wanted));
+                    queuedForThisSpawn++;
+                }
             }
 
             totalQueued += queuedForThisSpawn;
