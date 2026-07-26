@@ -1,8 +1,8 @@
 package kryptos;
 
 import arc.util.Log;
-import kryptos.automation.KryptosAutoConveyor;
 import kryptos.automation.KryptosLogicDeploy;
+import kryptos.automation.KryptosPerimeterDefense;
 import kryptos.automation.KryptosSmartDrill;
 import kryptos.world.KryptosOreGenerator;
 import kryptos.ui.KryptosAutomationPanel;
@@ -52,8 +52,8 @@ public final class KryptosBootstrap {
         // ===========================
 
         run("KryptosOreGenerator.init", KryptosOreGenerator::init);
-        run("KryptosAutoConveyor.init", KryptosAutoConveyor::init);
         run("KryptosSmartDrill.init", KryptosSmartDrill::init);
+        run("KryptosPerimeterDefense.init", KryptosPerimeterDefense::init);
         run("KryptosLogicDeploy.init", KryptosLogicDeploy::init);
 
         Log.info("Kryptos systems initialized.");
