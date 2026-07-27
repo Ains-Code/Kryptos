@@ -271,7 +271,19 @@ public final class KryptosPerimeterDefense {
             float px = -dy;
             float py = dx;
 
-            Style style = KryptosDefenseGeometry.classify(spawn, core.tile);
+            Style style;
+            try {
+                style = KryptosDefenseGeometry.classify(spawn, core.tile);
+            } catch (Throwable t) {
+                // Isolated on purpose: a bug in the newer geometry classifier
+                // should never be able to take down the whole (already
+                // proven) drone-building loop below it. Falls back to
+                // CHOKEPOINT via the lookup helpers' UNKNOWN case, same as
+                // before this feature existed.
+                Log.err("[Kryptos] PerimeterDefense: geometry classification failed for spawn #" + spawnIndex
+                    + ", falling back to CHOKEPOINT this scan", t);
+                style = Style.UNKNOWN;
+            }
             int halfWidth = lineHalfWidthFor(style);
             int turretEvery = turretEveryFor(style);
             int maxBuildsThisSpawn = maxBuildsFor(style);
