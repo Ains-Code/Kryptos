@@ -33,20 +33,20 @@ public class KryptosMod extends Mod {
     }
 
     @Override
-    public void init() {
-        // Runs after all mods' loadContent() has completed, so both vanilla
-        // and Kryptos content (KryptosBlocks.factory / oreFactory) already
-        // exist here -- safe to graft tech tree nodes onto them now.
-        KryptosTechTree.load();
-    }
-
-    @Override
     public void loadContent() {
         Log.info("Loading Kryptos content...");
 
         KryptosItems.load();
         KryptosUnits.load();
         KryptosBlocks.load();
+
+        // Must run here, not in init(). Planet.init() walks the tech tree
+        // exactly once (right after createModContent(), before Mod.init()
+        // is ever called) and tags each node's content as "shown on this
+        // planet." Nodes attached after that one-time pass are structurally
+        // correct but permanently invisible in the Database -- silently, no
+        // error. loadContent() runs before that pass; init() runs after it.
+        KryptosTechTree.load();
 
         Log.info("Kryptos content loaded.");
     }
