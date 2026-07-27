@@ -5,6 +5,7 @@ import arc.Events;
 import arc.util.Log;
 import kryptos.content.KryptosBlocks;
 import kryptos.content.KryptosItems;
+import kryptos.content.KryptosTechTree;
 import kryptos.content.KryptosUnits;
 import kryptos.ui.KryptosUpdateChecker;
 import mindustry.Vars;
@@ -29,6 +30,14 @@ public class KryptosMod extends Mod {
 
         Log.info("Kryptos initialization complete.");
     });
+    }
+
+    @Override
+    public void init() {
+        // Runs after all mods' loadContent() has completed, so both vanilla
+        // and Kryptos content (KryptosBlocks.factory / oreFactory) already
+        // exist here -- safe to graft tech tree nodes onto them now.
+        KryptosTechTree.load();
     }
 
     @Override
