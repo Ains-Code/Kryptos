@@ -36,8 +36,8 @@ public class KryptosMod extends Mod {
         Log.info("Loading Kryptos content...");
 
         KryptosItems.load();
-        KryptosBlocks.load();
         KryptosUnits.load();
+        KryptosBlocks.load();
 
         Log.info("Kryptos content loaded.");
     }
