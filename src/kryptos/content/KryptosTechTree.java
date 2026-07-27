@@ -19,16 +19,18 @@ import static mindustry.type.ItemStack.with;
  *
  * IMPORTANT: this deliberately does NOT call TechTree.node(existingVanillaBlock, ...)
  * for the parent -- that helper *creates a new node* for whatever content
- * you pass it, which would silently duplicate/overwrite Blocks.siliconSmelter's
- * real vanilla TechNode. Instead we read the existing node off
- * Blocks.siliconSmelter.techNode and attach directly to it via the public
- * TechNode(parent, content, requirements) constructor, which only registers
- * *new* nodes for our own content and leaves the vanilla tree untouched.
+ * you pass it, which would silently duplicate/overwrite Blocks.coreShard's
+ * real vanilla TechNode (the root of the entire Serpulo tree). Instead we
+ * read the existing node off Blocks.coreShard.techNode and attach directly
+ * to it via the public TechNode(parent, content, requirements) constructor,
+ * which only registers *new* nodes for our own content and leaves the
+ * vanilla tree untouched.
  *
- * Chain: silicon smelter (vanilla, early-game) -> ore factory (refines
- * Kryptos ore into alloy) -> unit factory (spends alloy... er, ore, to
- * build Striders). Research the refinery before the unit factory, since
- * the unit factory's plan consumes the raw ore the refinery also wants.
+ * Chain: Core: Foundation (vanilla root, always researched) -> ore factory
+ * (refines Kryptos ore into alloy) -> unit factory (spends ore to build
+ * Striders). Hanging it straight off the core means it shows up immediately
+ * as its own branch instead of being buried behind an unrelated vanilla
+ * prerequisite.
  */
 public final class KryptosTechTree {
 
@@ -37,16 +39,16 @@ public final class KryptosTechTree {
     }
 
     public static void load() {
-        TechNode siliconSmelterNode = Blocks.siliconSmelter.techNode;
+        TechNode coreNode = Blocks.coreShard.techNode;
 
-        if (siliconSmelterNode == null) {
+        if (coreNode == null) {
             // Defensive: if vanilla ever changes and this node stops existing,
             // don't NPE and take the rest of mod init down with it.
             return;
         }
 
         ItemStack[] oreFactoryCost = with(Items.silicon, 60, Items.titanium, 45);
-        TechNode oreFactoryNode = new TechNode(siliconSmelterNode, KryptosBlocks.oreFactory, oreFactoryCost);
+        TechNode oreFactoryNode = new TechNode(coreNode, KryptosBlocks.oreFactory, oreFactoryCost);
 
         ItemStack[] factoryCost = with(Items.silicon, 90, Items.titanium, 70, Items.lead, 60);
         new TechNode(oreFactoryNode, KryptosBlocks.factory, factoryCost);
