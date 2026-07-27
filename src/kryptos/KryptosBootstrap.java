@@ -3,6 +3,7 @@ package kryptos;
 import arc.util.Log;
 import kryptos.automation.KryptosLogicDeploy;
 import kryptos.automation.KryptosSmartDrill;
+import kryptos.content.KryptosBlocks;
 import kryptos.world.KryptosOreGenerator;
 import kryptos.ui.KryptosAutomationPanel;
 import kryptos.ui.KryptosHealthBar;
@@ -12,6 +13,8 @@ import kryptos.ui.KryptosRangeDisplay;
 import kryptos.ui.KryptosTheme;
 import kryptos.ui.KryptosTimeControl;
 import kryptos.util.KryptosCrashLogger;
+import mindustry.content.TechTree.TechNode;
+import mindustry.ctype.UnlockableContent;
 
 public final class KryptosBootstrap {
 
@@ -54,7 +57,41 @@ public final class KryptosBootstrap {
         run("KryptosSmartDrill.init", KryptosSmartDrill::init);
         run("KryptosLogicDeploy.init", KryptosLogicDeploy::init);
 
+        // ===========================
+        // Diagnostics
+        // ===========================
+
+        run("KryptosBootstrap.diagnoseTechTree", KryptosBootstrap::diagnoseTechTree);
+
         Log.info("Kryptos systems initialized.");
+    }
+
+    /**
+     * TEMP DIAGNOSTIC -- remove once the Database/tech-tree visibility issue
+     * is confirmed fixed. Dumps the actual post-init runtime state of each
+     * Kryptos block's TechNode wiring, since the Database screen's behavior
+     * depends on state set by Planet.init() (shownPlanets) and
+     * UnlockableContent.postInit() (databaseTabs), neither of which we can
+     * inspect just by reading the source.
+     */
+    private static void diagnoseTechTree() {
+        dumpNode("KryptosBlocks.oreFactory", KryptosBlocks.oreFactory);
+        dumpNode("KryptosBlocks.factory", KryptosBlocks.factory);
+    }
+
+    private static void dumpNode(String label, UnlockableContent content) {
+        if (content == null) {
+            Log.info("[Kryptos][diag] @ -> content reference itself is null!", label);
+            return;
+        }
+
+        TechNode node = content.techNode;
+
+        Log.info("[Kryptos][diag] @", label);
+        Log.info("[Kryptos][diag]   techNode: @", node == null ? "NULL (no TechNode at all)" : "present, parent=" + (node.parent == null ? "none (root)" : node.parent.content.name));
+        Log.info("[Kryptos][diag]   shownPlanets: @", content.shownPlanets.isEmpty() ? "EMPTY" : content.shownPlanets.toString());
+        Log.info("[Kryptos][diag]   databaseTabs: @", content.databaseTabs.isEmpty() ? "EMPTY" : content.databaseTabs.toString());
+        Log.info("[Kryptos][diag]   unlocked(): @", content.unlocked());
     }
 
     /**
