@@ -170,6 +170,20 @@ public final class KryptosPerimeterDefense {
         int wanted = spawner.getSpawns().size;
         Team team = Vars.player.team();
 
+        // If the spawn count ever drops (e.g. spawner.getSpawns() legitimately
+        // returns fewer/zero on some map types), the drones in the slots
+        // about to be dropped need to be explicitly killed here first.
+        // setSize() alone just stops TRACKING them -- the actual unit keeps
+        // existing in the world with nothing left to manage it, which looks
+        // exactly like "the defense unit isn't moving" (it's not: it's
+        // orphaned, frozen wherever it last was).
+        if (wanted < helperUnits.size) {
+            for (int i = wanted; i < helperUnits.size; i++) {
+                Unit orphan = helperUnits.get(i);
+                if (orphan != null && orphan.isValid()) orphan.kill();
+            }
+        }
+
         // setSize both grows (new slots default to null) and truncates
         // (extras just dropped) -- verified against Arc's Seq source.
         helperUnits.setSize(wanted);
@@ -192,6 +206,8 @@ public final class KryptosPerimeterDefense {
         KryptosBuilderUnits.killAll();
     }
 
+    private static float lastGateLogTime = -1e9f;
+
     private static void update() {
         if (!Vars.state.isGame()) return;
         if (!Vars.state.rules.waves) {
@@ -207,6 +223,18 @@ public final class KryptosPerimeterDefense {
         if (Vars.player == null) return;
 
         ensureHelpers();
+
+        // Diagnostic: prints the live state every ~5s regardless of whether
+        // anything looks visibly wrong. If a drone is reported "not moving"
+        // again, this pins down exactly which stage is at fault: no spawns
+        // detected, no drone for a slot, or nothing left to build this cycle.
+        if (Time.time - lastGateLogTime > 300f) {
+            lastGateLogTime = Time.time;
+            int spawnCount = spawner == null ? -1 : spawner.getSpawns().size;
+            Log.info("[Kryptos] PerimeterDefense gate check: autoplay=@ autoPerimeterDefense=@ spawnCount=@ drones=@ anyBuilding=@",
+                KryptosHud.autoplay, KryptosAutomationPanel.autoPerimeterDefense, spawnCount, helperUnits.size, anyHelperBuilding());
+        }
+
         if (helperUnits.isEmpty()) {
             state = State.IDLE;
             return;
@@ -235,20 +263,14 @@ public final class KryptosPerimeterDefense {
     private static void scanAndBuildDefenses() {
         Team team = Vars.player.team();
         Building core = team.core();
-        if (core == null) {
-            Log.info("[Kryptos] PerimeterDefense: no core found for @, skipping this scan", team);
-            return;
-        }
+        if (core == null) return;
 
-        if (spawner == null || spawner.getSpawns().isEmpty()) {
-            Log.info("[Kryptos] PerimeterDefense: no spawn points known yet, skipping this scan");
-            return;
-        }
+        if (spawner == null || spawner.getSpawns().isEmpty()) return;
 
         Block turretType = bestUnlockedTurret(core);
         Block wallType = bestUnlockedWall(core);
         if (turretType == null && wallType == null) {
-            Log.info("[Kryptos] PerimeterDefense: no unlocked+affordable turret or wall available yet, skipping this scan");
+            Log.info("[Kryptos] PerimeterDefense: no unlocked/affordable wall or turret found, nothing to build this cycle");
             return;
         }
 
@@ -267,10 +289,7 @@ public final class KryptosPerimeterDefense {
         for (int spawnIndex = 0; spawnIndex < spawns.size; spawnIndex++) {
             Tile spawn = spawns.get(spawnIndex);
             Unit drone = spawnIndex < helperUnits.size ? helperUnits.get(spawnIndex) : null;
-            if (drone == null) {
-                Log.info("[Kryptos] PerimeterDefense: spawn #@ has no drone yet, skipping this scan", spawnIndex);
-                continue; // ensureHelpers() couldn't spawn this slot (e.g. no core) -- skip for now, try again next scan
-            }
+            if (drone == null) continue; // ensureHelpers() couldn't spawn this slot (e.g. no core) -- skip for now, try again next scan
 
             float dx = core.tile.x - spawn.x;
             float dy = core.tile.y - spawn.y;
@@ -318,8 +337,14 @@ public final class KryptosPerimeterDefense {
 
                     Tile tile = world.tile(lx, ly);
                     if (tile == null) continue;
-                    if (tile.block() == wallType) continue; // already built
-                    if (!isBuildable(tile)) continue;
+                    if (tile.block() == wallType) {
+                        // Already the right block -- instant-repair if it's
+                        // been chipped away at rather than waiting for it to
+                        // be fully destroyed and rebuilt from scratch.
+                        if (tile.build != null && tile.build.damaged()) tile.build.heal();
+                        continue;
+                    }
+                    if (!isBuildable(tile, team)) continue;
 
                     drone.addBuild(new BuildPlan(lx, ly, 0, wallType));
                     queuedForThisSpawn++;
@@ -343,8 +368,11 @@ public final class KryptosPerimeterDefense {
 
                     Tile tile = world.tile(lx, ly);
                     if (tile == null) continue;
-                    if (tile.block() == wanted) continue;
-                    if (!isBuildable(tile)) continue;
+                    if (tile.block() == wanted) {
+                        if (tile.build != null && tile.build.damaged()) tile.build.heal();
+                        continue;
+                    }
+                    if (!isBuildable(tile, team)) continue;
 
                     drone.addBuild(new BuildPlan(lx, ly, 0, wanted));
                     queuedForThisSpawn++;
@@ -362,16 +390,27 @@ public final class KryptosPerimeterDefense {
         if (totalQueued > 0) {
             Log.info("[Kryptos] PerimeterDefense: queued @ turret/wall placements across @ spawn point(s), @ drone(s) active",
                 totalQueued, spawns.size, helperUnits.size);
-        } else {
-            Log.info("[Kryptos] PerimeterDefense: scan complete, nothing to build (@ spawn point(s), @ drone(s) active) -- line may already be fully built",
-                spawns.size, helperUnits.size);
         }
     }
 
-    private static boolean isBuildable(Tile tile) {
+    private static boolean isBuildable(Tile tile, Team team) {
         if (tile.block() != Blocks.air) return false;
         if (tile.floor().isLiquid) return false;
         if (tile.overlay() instanceof OreBlock) return false; // leave ore for SmartDrill
+
+        // Mindustry's own Build.validPlace() (checked by KryptosDroneAI before
+        // it'll act on a queued plan) rejects placement near an ENEMY core,
+        // not just our own -- see Teams.anyEnemyCoresWithinBuildRadius(). On
+        // an attack-mode sector with an actual enemy base near its spawn,
+        // building "just outside the drop zone" can still land inside that
+        // protected radius. Without this check here, every plan queued in
+        // that zone gets silently discarded the instant the drone reaches
+        // it (see KryptosDroneAI.updateMovement()'s validity check), which
+        // looks exactly like "the drone never does anything."
+        float worldX = tile.x * tilesize;
+        float worldY = tile.y * tilesize;
+        if (Vars.state.teams.anyEnemyCoresWithinBuildRadius(team, worldX, worldY)) return false;
+
         return true;
     }
 
