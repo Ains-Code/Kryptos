@@ -12,7 +12,6 @@ import arc.scene.ui.Label;
 import arc.scene.ui.layout.Table;
 import arc.util.Log;
 import kryptos.automation.KryptosLogicDeploy;
-import kryptos.automation.KryptosPerimeterDefense;
 import kryptos.automation.KryptosSmartDrill;
 import mindustry.content.Blocks;
 import mindustry.content.Items;
@@ -25,9 +24,8 @@ import static mindustry.Vars.ui;
  * The "many different automations" panel requested alongside Autoplay --
  * only visible while {@link KryptosHud#autoplay} is on (see the wiring in
  * {@link KryptosHud#build()}). Each automation gets one toggle row here;
- * this module ships with Smart Drill ({@link KryptosSmartDrill}) and
- * Perimeter Defense ({@link KryptosPerimeterDefense}), and is built so more
- * can be added the same way later.
+ * this module ships with Smart Drill ({@link KryptosSmartDrill}), and is
+ * built so more can be added the same way later.
  *
  * Follows the same draggable-panel-with-remembered-position pattern as
  * {@link KryptosTeamPanel}.
@@ -54,9 +52,6 @@ public class KryptosAutomationPanel {
      */
     public static boolean autoSmartDrill = false;
 
-    /** Master switch for the perimeter defense module; read by {@link KryptosPerimeterDefense}. */
-    public static boolean autoPerimeterDefense = false;
-
     private static Table container;
     private static Table content;
     private static Label statusLabel;
@@ -76,14 +71,6 @@ public class KryptosAutomationPanel {
                 .size(32f).pad(4f).tooltip("Smart Drill settings (max tiles / fill entire ore patch)");
         content.row();
 
-        KryptosHud.addToggle(content, new TextureRegionDrawable(Blocks.duo.uiIcon),
-                "Perimeter Defense", () -> autoPerimeterDefense, b -> {
-                    autoPerimeterDefense = b;
-                    Log.info("[Kryptos] Perimeter Defense toggle -> @", b);
-                    if (b) KryptosPerimeterDefense.requestImmediateScan();
-                });
-        content.row();
-
         // One-shot action, not a persistent state -- flipping it on queues the
         // Memory Cell + Smart Drill / Conveyor Maker processors near the core.
         // It doesn't stay "on"; addToggle's getter always reports false so it
@@ -98,7 +85,6 @@ public class KryptosAutomationPanel {
         statusLabel.setColor(STATUS_COLOR);
         statusLabel.update(() -> statusLabel.setText(
             "Drill [" + KryptosSmartDrill.state() + "]"
-            + " | Defense [" + KryptosPerimeterDefense.state() + "]"
         ));
         content.add(statusLabel).left().padTop(4f);
 
