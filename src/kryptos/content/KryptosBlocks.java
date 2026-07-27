@@ -1,8 +1,11 @@
 package kryptos.content;
 
+import mindustry.content.Fx;
 import mindustry.content.Items;
 import mindustry.type.Category;
+import mindustry.type.ItemStack;
 import mindustry.world.blocks.environment.OreBlock;
+import mindustry.world.blocks.production.GenericCrafter;
 import mindustry.world.blocks.units.UnitFactory;
 import mindustry.world.blocks.units.UnitFactory.UnitPlan;
 
@@ -11,6 +14,7 @@ import static mindustry.type.ItemStack.with;
 public class KryptosBlocks {
     public static OreBlock oreCustom;
     public static UnitFactory factory;
+    public static GenericCrafter oreFactory;
 
     public static void load() {
         oreCustom = new OreBlock("ore-kryptos", KryptosItems.customOre) {{
@@ -34,6 +38,21 @@ public class KryptosBlocks {
             consumePower(1.5f);
 
             plans.add(new UnitPlan(KryptosUnits.strider, 60f * 25f, with(KryptosItems.customOre, 40)));
+        }};
+
+        // KryptosFactory: the actual ore-processing building (distinct from
+        // the UnitFactory above, which is unfortunately also named
+        // "kryptos-factory" internally -- do not confuse the two).
+        // Sprite needed: sprites/blocks/production/kryptos-ore-factory.png
+        // (2x2, plus an optional "-rotator"/top layer if drawer needs one).
+        oreFactory = new GenericCrafter("kryptos-ore-factory") {{
+            requirements(Category.crafting, with(Items.silicon, 50, Items.titanium, 40, Items.lead, 40));
+            size = 2;
+            craftTime = 50f;
+            craftEffect = Fx.pulverizeMedium;
+            outputItem = new ItemStack(KryptosItems.alloy, 1);
+
+            consumeItem(KryptosItems.customOre, 2);
         }};
     }
 }
