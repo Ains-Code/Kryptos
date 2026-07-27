@@ -235,13 +235,22 @@ public final class KryptosPerimeterDefense {
     private static void scanAndBuildDefenses() {
         Team team = Vars.player.team();
         Building core = team.core();
-        if (core == null) return;
+        if (core == null) {
+            Log.info("[Kryptos] PerimeterDefense: no core found for @, skipping this scan", team);
+            return;
+        }
 
-        if (spawner == null || spawner.getSpawns().isEmpty()) return;
+        if (spawner == null || spawner.getSpawns().isEmpty()) {
+            Log.info("[Kryptos] PerimeterDefense: no spawn points known yet, skipping this scan");
+            return;
+        }
 
         Block turretType = bestUnlockedTurret(core);
         Block wallType = bestUnlockedWall(core);
-        if (turretType == null && wallType == null) return;
+        if (turretType == null && wallType == null) {
+            Log.info("[Kryptos] PerimeterDefense: no unlocked+affordable turret or wall available yet, skipping this scan");
+            return;
+        }
 
         // Outer row (closer to the spawn, hit first) is pure wall -- a
         // shield with nothing valuable exposed on it. Inner row (one tile
@@ -258,7 +267,10 @@ public final class KryptosPerimeterDefense {
         for (int spawnIndex = 0; spawnIndex < spawns.size; spawnIndex++) {
             Tile spawn = spawns.get(spawnIndex);
             Unit drone = spawnIndex < helperUnits.size ? helperUnits.get(spawnIndex) : null;
-            if (drone == null) continue; // ensureHelpers() couldn't spawn this slot (e.g. no core) -- skip for now, try again next scan
+            if (drone == null) {
+                Log.info("[Kryptos] PerimeterDefense: spawn #@ has no drone yet, skipping this scan", spawnIndex);
+                continue; // ensureHelpers() couldn't spawn this slot (e.g. no core) -- skip for now, try again next scan
+            }
 
             float dx = core.tile.x - spawn.x;
             float dy = core.tile.y - spawn.y;
@@ -350,6 +362,9 @@ public final class KryptosPerimeterDefense {
         if (totalQueued > 0) {
             Log.info("[Kryptos] PerimeterDefense: queued @ turret/wall placements across @ spawn point(s), @ drone(s) active",
                 totalQueued, spawns.size, helperUnits.size);
+        } else {
+            Log.info("[Kryptos] PerimeterDefense: scan complete, nothing to build (@ spawn point(s), @ drone(s) active) -- line may already be fully built",
+                spawns.size, helperUnits.size);
         }
     }
 
