@@ -37,6 +37,8 @@ public class KryptosUnits {
 
     public static void load() {
         strider = new UnitType("kryptos-strider") {{
+            alwaysUnlocked = true;
+
             // "hover" preset -- see class doc above. No legs/mech animation,
             // matching the current placeholder sprite (a drone-like hull,
             // not a legged mech).
