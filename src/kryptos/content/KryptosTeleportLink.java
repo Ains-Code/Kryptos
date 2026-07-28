@@ -1,5 +1,6 @@
 package kryptos.content;
 
+import arc.graphics.g2d.Draw;
 import arc.math.geom.Point2;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
@@ -9,6 +10,7 @@ import mindustry.type.Item;
 import mindustry.world.Block;
 import mindustry.world.meta.BuildVisibility;
 
+import static mindustry.Vars.content;
 import static mindustry.Vars.world;
 
 /**
@@ -52,6 +54,10 @@ public class KryptosTeleportLink extends Block {
 
         public int linkPos = -1;
 
+        // Same reasoning as KryptosItemTeleporter: show whatever item last
+        // passed through instead of a fixed icon.
+        public Item lastItem;
+
         @Override
         public boolean acceptItem(Building source, Item item) {
             Building target = linkedBuilding();
@@ -63,12 +69,21 @@ public class KryptosTeleportLink extends Block {
             Building target = linkedBuilding();
             if (target != null && target != this) {
                 target.handleItem(this, item);
+                lastItem = item;
                 Fx.teleportOut.at(x, y, 0f, item.color);
                 Fx.teleport.at(target.x, target.y, 0f, item.color);
             }
             // No valid link: item just vanishes (teleport failed silently),
             // matching how KryptosItemTeleporter drops items when the core
             // is unreachable.
+        }
+
+        @Override
+        public void draw() {
+            super.draw();
+            if (lastItem != null) {
+                Draw.rect(lastItem.fullIcon, x, y, 8f, 8f);
+            }
         }
 
         private Building linkedBuilding() {
@@ -91,12 +106,15 @@ public class KryptosTeleportLink extends Block {
         public void write(Writes write) {
             super.write(write);
             write.i(linkPos);
+            write.s(lastItem == null ? -1 : lastItem.id);
         }
 
         @Override
         public void read(Reads read, byte revision) {
             super.read(read, revision);
             linkPos = read.i();
+            short itemId = read.s();
+            lastItem = itemId == -1 ? null : content.item(itemId);
         }
     }
 }
