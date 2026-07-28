@@ -60,6 +60,42 @@ public class KryptosTeleportLink extends Block {
         // passed through instead of a fixed icon.
         public Item lastItem;
 
+        // Enables in-game tap-to-link (select this block, then tap another
+        // KryptosTeleportLink to link to it) -- mirrors the pattern used by
+        // vanilla PowerNode/PayloadMassDriver. Without this override, the
+        // default onConfigureBuildTapped() never calls configure() with the
+        // tapped building -- it just decides whether to deselect.
+        //
+        // 'other' is null whenever the tap didn't land on a building at all
+        // (bare ground, a non-solid tile, etc) -- that case must be handled
+        // explicitly, since calling other.pos()/other.block on null is what
+        // crashed the client before.
+        @Override
+        public boolean onConfigureBuildTapped(Building other) {
+            if (this == other) {
+                // Double-tapping self clears the link.
+                configure(-1);
+                return false;
+            }
+
+            if (other == null) {
+                // Tapped empty space -- nothing to link to; just let the
+                // default handling close the config UI.
+                return true;
+            }
+
+            if (linkPos == other.pos()) {
+                // Tapping the currently-linked target again unlinks it.
+                configure(-1);
+                return false;
+            } else if (other.block instanceof KryptosTeleportLink && other.team == team) {
+                configure(other.pos());
+                return false;
+            }
+
+            return true;
+        }
+
         @Override
         public boolean acceptItem(Building source, Item item) {
             Building target = linkedBuilding();
