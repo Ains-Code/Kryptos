@@ -15,6 +15,7 @@ public class KryptosBlocks {
     public static OreBlock oreCustom;
     public static UnitFactory factory;
     public static GenericCrafter oreFactory;
+    public static KryptosItemTeleporter itemTeleporter;
     public static KryptosTeleportLink teleportLink;
 
     public static void load() {
@@ -55,6 +56,15 @@ public class KryptosBlocks {
             outputItem = new ItemStack(KryptosItems.alloy, 1);
 
             consumeItem(KryptosItems.customOre, 2);
+        }};
+
+        // Instantly moves any accepted item into the team's core inventory --
+        // no physical belt/bridge connection needed, no range limit. Sprite:
+        // sprites/blocks/distribution/kryptos-item-teleporter.png (1x1).
+        itemTeleporter = new KryptosItemTeleporter("kryptos-item-teleporter") {{
+            alwaysUnlocked = true;
+            requirements(Category.distribution, with(Items.copper, 1));
+            size = 1;
         }};
 
         // Point-to-point pair: link one to another via logic
