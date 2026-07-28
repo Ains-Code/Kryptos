@@ -3,7 +3,6 @@ package kryptos.content;
 import arc.graphics.g2d.Draw;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
-import mindustry.content.Fx;
 import mindustry.gen.Building;
 import mindustry.type.Item;
 import mindustry.world.Block;
@@ -58,8 +57,8 @@ public class KryptosItemTeleporter extends Block {
             if (core != null) {
                 core.items.add(item, 1);
                 lastItem = item;
-                Fx.teleportOut.at(x, y, 0f, item.color);
-                Fx.teleport.at(core.x, core.y, 0f, item.color);
+                KryptosFx.scanTeleportOut.at(x, y, 0f, item.color);
+                KryptosFx.scanTeleport.at(core.x, core.y, 0f, item.color);
             }
             // Intentionally not calling items.add(...) here -- the item is
             // teleported, not stored locally.
