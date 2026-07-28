@@ -4,7 +4,6 @@ import arc.graphics.g2d.Draw;
 import arc.math.geom.Point2;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
-import mindustry.content.Fx;
 import mindustry.gen.Building;
 import mindustry.type.Item;
 import mindustry.world.Block;
@@ -58,6 +57,32 @@ public class KryptosTeleportLink extends Block {
         // passed through instead of a fixed icon.
         public Item lastItem;
 
+        // Enables in-game tap-to-link (select this block, then tap another
+        // KryptosTeleportLink to link to it) -- mirrors the pattern used by
+        // vanilla PowerNode/PayloadMassDriver. Without this override, the
+        // block only linked via logic's `control configure`, since the
+        // default onConfigureBuildTapped() never calls configure() with the
+        // tapped building -- it just decides whether to deselect.
+        @Override
+        public boolean onConfigureBuildTapped(Building other) {
+            if (this == other) {
+                // Double-tapping self clears the link.
+                configure(-1);
+                return false;
+            }
+
+            if (linkPos == other.pos()) {
+                // Tapping the currently-linked target again unlinks it.
+                configure(-1);
+                return false;
+            } else if (other.block instanceof KryptosTeleportLink && other.team == team) {
+                configure(other.pos());
+                return false;
+            }
+
+            return true;
+        }
+
         @Override
         public boolean acceptItem(Building source, Item item) {
             Building target = linkedBuilding();
@@ -70,8 +95,8 @@ public class KryptosTeleportLink extends Block {
             if (target != null && target != this) {
                 target.handleItem(this, item);
                 lastItem = item;
-                Fx.teleportOut.at(x, y, 0f, item.color);
-                Fx.teleport.at(target.x, target.y, 0f, item.color);
+                KryptosFx.scanTeleportOut.at(x, y, 0f, item.color);
+                KryptosFx.scanTeleport.at(target.x, target.y, 0f, item.color);
             }
             // No valid link: item just vanishes (teleport failed silently),
             // matching how KryptosItemTeleporter drops items when the core
