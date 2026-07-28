@@ -38,7 +38,7 @@ public class KryptosBlocks {
             size = 3;
             consumePower(1.5f);
 
-            plans.add(new UnitPlan(KryptosUnits.strider, 60f * 25f, with(Items.copper, 1)));
+            plans.add(new UnitPlan(KryptosUnits.strider, 60f * 5f, with(Items.copper, 1)));
         }};
 
         // KryptosFactory: the actual ore-processing building (distinct from
