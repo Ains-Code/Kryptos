@@ -3,16 +3,20 @@ package kryptos.content;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Lines;
+import arc.math.Mathf;
 import arc.math.geom.Point2;
+import arc.util.Time;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
 import mindustry.gen.Building;
+import mindustry.graphics.Drawf;
 import mindustry.graphics.Pal;
 import mindustry.type.Item;
 import mindustry.world.Block;
 import mindustry.world.meta.BuildVisibility;
 
 import static mindustry.Vars.content;
+import static mindustry.Vars.tilesize;
 import static mindustry.Vars.world;
 
 /**
@@ -94,6 +98,26 @@ public class KryptosTeleportLink extends Block {
             }
 
             return true;
+        }
+
+        // Shown while this block is selected (config open) -- draws a
+        // pulsing outline on this block, and if it's already linked, a
+        // highlighted outline + arrow pointing at the current target so
+        // the player can see the link regardless of distance (there's no
+        // range limit here, unlike PayloadMassDriver's dashCircle, so we
+        // don't try to show "all valid tiles" -- any other same-team
+        // KryptosTeleportLink on the map is a valid tap target).
+        @Override
+        public void drawConfigure() {
+            float sin = Mathf.absin(Time.time, 6f, 1f);
+
+            Drawf.select(x, y, size * tilesize / 2f + 2f + sin, Pal.accent);
+
+            Building target = linkedBuilding();
+            if (target != null && target != this) {
+                Drawf.select(target.x, target.y, target.block.size * tilesize / 2f + 2f + sin, Pal.place);
+                Drawf.arrow(x, y, target.x, target.y, size * tilesize + sin, 4f + sin, Pal.place);
+            }
         }
 
         @Override
