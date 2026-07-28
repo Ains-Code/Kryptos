@@ -33,11 +33,12 @@ public class KryptosBlocks {
         // KryptosUnits.load() to have already run (see KryptosMod.loadContent
         // ordering: Items -> Units -> Blocks).
         factory = new UnitFactory("kryptos-factory") {{
-            requirements(Category.units, with(Items.silicon, 80, Items.titanium, 60, Items.lead, 60));
+            alwaysUnlocked = true;
+            requirements(Category.units, with(Items.copper, 1));
             size = 3;
             consumePower(1.5f);
 
-            plans.add(new UnitPlan(KryptosUnits.strider, 60f * 25f, with(KryptosItems.customOre, 40)));
+            plans.add(new UnitPlan(KryptosUnits.strider, 60f * 25f, with(Items.copper, 1)));
         }};
 
         // KryptosFactory: the actual ore-processing building (distinct from
