@@ -13,9 +13,9 @@ import java.io.StringWriter;
  * before the process dies. This exists specifically so crashes can be
  * diagnosed on-device without needing adb/logcat access.
  *
- * File is written to Mindustry's own external files dir (same place mods
- * live), e.g.:
- * /storage/emulated/0/Android/data/io.anuke.mindustry/files/kryptos-crash.txt
+ * File is written to Mindustry's own private/local files dir (app storage,
+ * always writable, no permission needed), e.g. on Android:
+ * /data/data/io.anuke.mindustry/files/kryptos-crash.txt
  *
  * Note: this only catches crashes that happen *inside the JVM* (uncaught
  * Java exceptions/errors, including OutOfMemoryError and
@@ -43,8 +43,12 @@ public final class KryptosCrashLogger {
                 writeCrashFile(thread, throwable);
             } catch (Throwable writeFailure) {
                 // If we can't even write the crash file (e.g. genuinely out of
-                // memory), at least try to get something into the normal log.
+                // memory, or a storage permission issue), log BOTH the write
+                // failure and the original crash -- otherwise the original
+                // exception that actually crashed the game is silently lost,
+                // and only this secondary write error ever surfaces.
                 Log.err("[Kryptos] Failed to write crash file", writeFailure);
+                Log.err("[Kryptos] Original crash was:", throwable);
             }
 
             // Preserve default behavior (Mindustry's own handler, or the
@@ -66,17 +70,18 @@ public final class KryptosCrashLogger {
             "Thread: " + thread.getName() + "\n\n" +
             sw.toString();
 
-        Fi file = externalFile();
+        Fi file = localFile();
         file.writeString(content, false);
 
         Log.err("[Kryptos] CRASH written to @", file.absolutePath());
     }
 
-    private static Fi externalFile() {
-        // arc.Core.files.external(...) points at the app's own external
-        // files dir on Android -- no storage permission needed since it's
-        // app-scoped, and it's the same place the mod/crash folders live.
-        return arc.Core.files.external(FILE_NAME);
+    private static Fi localFile() {
+        // arc.Core.files.local(...) points at the app's own private files
+        // dir -- always writable with no storage permission required,
+        // unlike files.external(...), which maps to the *root* of shared
+        // external storage on Android and is blocked by scoped storage
+        // (EPERM) on Android 10+ without MANAGE_EXTERNAL_STORAGE.
+        return arc.Core.files.local(FILE_NAME);
     }
 }
-
