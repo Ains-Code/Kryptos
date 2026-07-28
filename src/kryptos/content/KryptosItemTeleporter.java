@@ -1,9 +1,12 @@
 package kryptos.content;
 
 import arc.graphics.g2d.Draw;
+import arc.graphics.g2d.Fill;
+import arc.graphics.g2d.Lines;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
 import mindustry.gen.Building;
+import mindustry.graphics.Pal;
 import mindustry.type.Item;
 import mindustry.world.Block;
 import mindustry.world.blocks.storage.CoreBlock.CoreBuild;
@@ -68,7 +71,16 @@ public class KryptosItemTeleporter extends Block {
         public void draw() {
             super.draw();
             if (lastItem != null) {
-                Draw.rect(lastItem.fullIcon, x, y, 8f, 8f);
+                // Recessed socket so the ore/item reads as sitting *inside*
+                // the block instead of floating flush with its edges.
+                Draw.color(Pal.darkestMetal);
+                Fill.square(x, y, 3f);
+                Draw.color(Pal.darkOutline);
+                Lines.stroke(1f);
+                Lines.square(x, y, 3f);
+                Draw.reset();
+
+                Draw.rect(lastItem.fullIcon, x, y, 5f, 5f);
             }
         }
 
