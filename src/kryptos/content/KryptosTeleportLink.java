@@ -120,24 +120,35 @@ public class KryptosTeleportLink extends Block {
             }
         }
 
+        // Max number of teleport-link hops to follow before giving up.
+        // Without this cap, a link cycle (A -> B -> A, or any longer loop)
+        // would make acceptItem/handleItem call each other forever and
+        // crash with a StackOverflowError -- this happened for real (see
+        // crash log: infinite kryptos.content.KryptosTeleportLink$
+        // KryptosTeleportLinkBuild.acceptItem recursion). Any ordinary
+        // chain of linked teleporters is nowhere near this deep, so hitting
+        // the cap always means a cycle or a broken/dangling link -- in
+        // both cases we just drop the item like any other dead link.
+        private static final int MAX_LINK_HOPS = 64;
+
         @Override
         public boolean acceptItem(Building source, Item item) {
-            Building target = linkedBuilding();
-            return target != null && target != this && target.acceptItem(this, item);
+            Building target = resolveFinalTarget();
+            return target != null && target.acceptItem(this, item);
         }
 
         @Override
         public void handleItem(Building source, Item item) {
-            Building target = linkedBuilding();
-            if (target != null && target != this) {
+            Building target = resolveFinalTarget();
+            if (target != null) {
                 target.handleItem(this, item);
                 lastItem = item;
                 KryptosFx.scanTeleportOut.at(x, y, 0f, item.color);
                 KryptosFx.scanTeleport.at(target.x, target.y, 0f, item.color);
             }
-            // No valid link: item just vanishes (teleport failed silently),
-            // matching how KryptosItemTeleporter drops items when the core
-            // is unreachable.
+            // No valid link (or a cycle): item just vanishes (teleport
+            // failed silently), matching how KryptosItemTeleporter drops
+            // items when the core is unreachable.
         }
 
         @Override
@@ -162,6 +173,25 @@ public class KryptosTeleportLink extends Block {
             var t = world.tile(Point2.x(linkPos), Point2.y(linkPos));
             return t != null ? t.build : null;
         }
+
+        // Follows the link chain iteratively (NOT recursively) until it
+        // reaches a building that isn't itself a KryptosTeleportLink --
+        // that's the real destination whose own acceptItem/handleItem we
+        // delegate to. Returns null for a dead link, a self-link, or if
+        // the chain is still going after MAX_LINK_HOPS (a cycle).
+        private Building resolveFinalTarget() {
+            Building current = this;
+            for (int hops = 0; hops < MAX_LINK_HOPS; hops++) {
+                if (!(current instanceof KryptosTeleportLinkBuild link)) {
+                    return current;
+                }
+                Building next = link.linkedBuilding();
+                if (next == null || next == this) return null;
+                current = next;
+            }
+            return null;
+        }
+
 
         @Override
         public Integer config() {
