@@ -15,6 +15,7 @@ public class KryptosBlocks {
     public static OreBlock oreCustom;
     public static UnitFactory factory;
     public static GenericCrafter oreFactory;
+    public static KryptosItemTeleporter itemTeleporter;
 
     public static void load() {
         oreCustom = new OreBlock("ore-kryptos", KryptosItems.customOre) {{
@@ -38,7 +39,7 @@ public class KryptosBlocks {
             size = 3;
             consumePower(1.5f);
 
-            plans.add(new UnitPlan(KryptosUnits.strider, 60f * 5f, with(Items.copper, 1)));
+            plans.add(new UnitPlan(KryptosUnits.strider, 60f * 1f, with(Items.copper, 1)));
         }};
 
         // KryptosFactory: the actual ore-processing building (distinct from
@@ -54,6 +55,15 @@ public class KryptosBlocks {
             outputItem = new ItemStack(KryptosItems.alloy, 1);
 
             consumeItem(KryptosItems.customOre, 2);
+        }};
+
+        // Instantly moves any accepted item into the team's core inventory --
+        // no physical belt/bridge connection needed, no range limit. Sprite:
+        // sprites/blocks/distribution/kryptos-item-teleporter.png (1x1).
+        itemTeleporter = new KryptosItemTeleporter("kryptos-item-teleporter") {{
+            alwaysUnlocked = true;
+            requirements(Category.distribution, with(Items.copper, 1));
+            size = 1;
         }};
     }
 }
