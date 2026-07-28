@@ -70,14 +70,14 @@ public class KryptosUnits {
                 x = 5f;
                 y = 1f;
                 reload = 40f;
-                bullet = new BasicBulletType(6.5f, 28f) {{
+                bullet = new BasicBulletType(6.5f, 500f) {{
                     width = 10f;
                     height = 14f;
                     lifetime = 40f;
                     hitEffect = Fx.blastExplosion;
                     despawnEffect = Fx.none;
-                    splashDamage = 55f;
-                    splashDamageRadius = 24f;
+                    splashDamage = 400f;
+                    splashDamageRadius = 40f;
                 }};
             }});
         }};
