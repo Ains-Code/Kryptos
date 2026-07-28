@@ -134,14 +134,26 @@ public class KryptosTeleportLink extends Block {
         @Override
         public boolean acceptItem(Building source, Item item) {
             Building target = resolveFinalTarget();
-            return target != null && target.acceptItem(this, item);
+            if (target == null) return false;
+            if (target instanceof KryptosTeleportLinkBuild terminal) {
+                // Terminal teleport link with nowhere further to forward --
+                // it holds the item itself (like a tiny buffer) so nearby
+                // extractors/inserters can pull it out, instead of
+                // requiring every link to chain onward to some other block.
+                return terminal.items.total() < itemCapacity;
+            }
+            return target.acceptItem(this, item);
         }
 
         @Override
         public void handleItem(Building source, Item item) {
             Building target = resolveFinalTarget();
             if (target != null) {
-                target.handleItem(this, item);
+                if (target instanceof KryptosTeleportLinkBuild terminal) {
+                    terminal.items.add(item, 1);
+                } else {
+                    target.handleItem(this, item);
+                }
                 lastItem = item;
                 KryptosFx.scanTeleportOut.at(x, y, 0f, item.color);
                 KryptosFx.scanTeleport.at(target.x, target.y, 0f, item.color);
@@ -175,22 +187,27 @@ public class KryptosTeleportLink extends Block {
         }
 
         // Follows the link chain iteratively (NOT recursively) until it
-        // reaches a building that isn't itself a KryptosTeleportLink --
-        // that's the real destination whose own acceptItem/handleItem we
-        // delegate to. Returns null for a dead link, a self-link, or if
-        // the chain is still going after MAX_LINK_HOPS (a cycle).
+        // reaches either a building that isn't itself a KryptosTeleportLink,
+        // or a KryptosTeleportLink that has no further outgoing link of its
+        // own -- both count as a valid terminal delivery point. Returns
+        // null only for a direct cycle back to the origin, or if the chain
+        // is still going after MAX_LINK_HOPS (a longer cycle).
         private Building resolveFinalTarget() {
             Building current = this;
             for (int hops = 0; hops < MAX_LINK_HOPS; hops++) {
                 if (!(current instanceof KryptosTeleportLinkBuild link)) {
-                    return current;
+                    return current; // reached a normal, non-teleport-link building
                 }
                 Building next = link.linkedBuilding();
-                if (next == null || next == this) return null;
+                if (next == null) {
+                    return current; // chain ends here -- this link IS the terminal
+                }
+                if (next == this) return null; // direct cycle back to the origin
                 current = next;
             }
-            return null;
+            return null; // likely a longer cycle -- give up rather than loop forever
         }
+
 
 
         @Override
