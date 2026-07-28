@@ -3,6 +3,7 @@ package kryptos.automation;
 import arc.Events;
 import arc.struct.Seq;
 import arc.util.Log;
+import arc.util.Time;
 import mindustry.Vars;
 import mindustry.content.Blocks;
 import mindustry.entities.units.BuildPlan;
@@ -35,6 +36,13 @@ public final class KryptosLogicDeploy {
 
     private static boolean pending = false;
     private static int cellX, cellY, drillProcX, drillProcY, convProcX, convProcY;
+    private static float deployStartTime;
+
+    // If construction hasn't finished within this many ticks (60 ticks = 1s),
+    // give up instead of waiting forever -- e.g. if the target tiles are
+    // occupied or unreachable, cellDone/drillDone/convDone would otherwise
+    // never all become true and `pending` would stay stuck permanently.
+    private static final float DEPLOY_TIMEOUT_TICKS = 60f * 45f; // 45 seconds
 
     private KryptosLogicDeploy() {}
 
@@ -67,16 +75,41 @@ public final class KryptosLogicDeploy {
         convProcX = coreX + 4;
         convProcY = coreY + 4;
 
+        // Bail out early (instead of queuing doomed build plans and hanging
+        // forever in update()) if any target tile is already occupied by
+        // something other than the block we're about to place there -- e.g.
+        // a wall, another processor, or terrain that can't be built on.
+        if (isBlocked(cellX, cellY, Blocks.memoryCell)
+            || isBlocked(drillProcX, drillProcY, Blocks.microProcessor)
+            || isBlocked(convProcX, convProcY, Blocks.microProcessor)) {
+            Log.warn("[Kryptos] Cannot deploy logic units: target tiles near core are occupied.");
+            return;
+        }
+
         unit.addBuild(new BuildPlan(cellX, cellY, 0, Blocks.memoryCell));
         unit.addBuild(new BuildPlan(drillProcX, drillProcY, 0, Blocks.microProcessor));
         unit.addBuild(new BuildPlan(convProcX, convProcY, 0, Blocks.microProcessor));
 
         pending = true;
+        deployStartTime = Time.globalTime;
         Log.info("[Kryptos] Queued Memory Cell + Smart Drill + Conveyor Maker processors near core.");
+    }
+
+    /** True if the tile at (x, y) is occupied by a build that isn't already the target block. */
+    private static boolean isBlocked(int x, int y, mindustry.world.Block target) {
+        Tile tile = Vars.world.tile(x, y);
+        if (tile == null) return true; // out of bounds -- treat as blocked
+        return tile.build != null && tile.build.block != target;
     }
 
     private static void update() {
         if (!pending) return;
+
+        if (Time.globalTime - deployStartTime > DEPLOY_TIMEOUT_TICKS) {
+            Log.warn("[Kryptos] Logic deploy timed out after 45s -- construction never finished. Giving up.");
+            pending = false;
+            return;
+        }
 
         Tile cellTile = Vars.world.tile(cellX, cellY);
         Tile drillTile = Vars.world.tile(drillProcX, drillProcY);
@@ -116,12 +149,21 @@ public final class KryptosLogicDeploy {
     }
 
     // Keep in sync with smart-drill.mlog -- copy-paste, don't hand-edit both.
+    // FIX: producer now checks backpressure (widx - ridx) against QUEUE_CAP
+    // before locating/building a new drill. Previously it always wrote and
+    // incremented widx regardless of whether the consumer (conveyor-maker)
+    // had caught up, silently overwriting unread queue slots whenever the
+    // consumer fell more than QUEUE_CAP entries behind.
     private static final String SMART_DRILL_CODE = """
         set QUEUE_CAP 16
         loop:
         ubind @mono
         sensor isDead @unit @dead
         jump loop equal isDead 1
+        read widx cell1 0
+        read ridx cell1 1
+        op sub used widx ridx
+        jump loop greaterThanEq used QUEUE_CAP
         ulocate ore core true @copper oreX oreY found oreBuilding
         jump loop equal found 0
         ucontrol approach oreX oreY 3
@@ -133,7 +175,6 @@ public final class KryptosLogicDeploy {
         jump loop greaterThan dist 5
         ucontrol build oreX oreY @mechanical-drill 0 0 0
         wait 0.5
-        read widx cell1 0
         op mod slot widx QUEUE_CAP
         op mul slotOff slot 2
         op add xSlot slotOff 2
