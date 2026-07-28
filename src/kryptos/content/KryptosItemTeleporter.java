@@ -1,9 +1,9 @@
 package kryptos.content;
 
 import mindustry.gen.Building;
-import mindustry.gen.CoreBuild;
 import mindustry.type.Item;
 import mindustry.world.Block;
+import mindustry.world.blocks.storage.CoreBlock.CoreBuild;
 import mindustry.world.meta.BuildVisibility;
 
 /**
