@@ -64,6 +64,17 @@ public class KryptosTeleportLink extends Block {
         // passed through instead of a fixed icon.
         public Item lastItem;
 
+        // Without this, items delivered here (via handleItem storing them
+        // in `items` when this link is the terminal of a chain) just sit
+        // in storage forever -- nothing was ever pushing them onto an
+        // adjacent conveyor/inserter. dumpAccumulate() is the same
+        // mechanism vanilla blocks like ItemBridge use to push stored
+        // items outward each tick.
+        @Override
+        public void updateTile() {
+            dumpAccumulate();
+        }
+
         // Enables in-game tap-to-link (select this block, then tap another
         // KryptosTeleportLink to link to it) -- mirrors the pattern used by
         // vanilla PowerNode/PayloadMassDriver. Without this override, the
