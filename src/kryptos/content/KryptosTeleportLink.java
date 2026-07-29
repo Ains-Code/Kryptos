@@ -5,6 +5,7 @@ import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Lines;
 import arc.math.Mathf;
 import arc.math.geom.Point2;
+import arc.struct.IntSeq;
 import arc.util.Time;
 import arc.util.io.Reads;
 import arc.util.io.Writes;
@@ -20,19 +21,27 @@ import static mindustry.Vars.tilesize;
 import static mindustry.Vars.world;
 
 /**
- * Generic point-to-point item teleporter: a pair of these can be linked to
- * each other -- anything fed into one instantly appears out the other, at
+ * Generic point-to-point item teleporter: link one of these to one or more
+ * others -- anything fed into it instantly appears out a linked target, at
  * any distance, with no physical connection required in between.
+ *
+ * A single block can be linked to MULTIPLE targets. When it has more than
+ * one link, incoming items are round-robined across them (one item per
+ * target per turn) rather than duplicated -- this is a teleporter, not a
+ * copier. Many different source links can also all point at the same
+ * single target with no special handling needed.
  *
  * Linking is done through logic: {@code control configure <this> <other> 0 0 0}
  * where <other> is a bound/sensed Building reference (e.g. via {@code getlink}
- * or a unit-sensed building). The link is one-directional per block -- link
- * both ends to each other for two-way flow.
+ * or a unit-sensed building). Configuring the same target again removes it
+ * from the link list (toggle); configuring with a null/-1 building clears
+ * all links. Links are one-directional per block -- link both ends to each
+ * other for two-way flow.
  *
- * The link target is stored as a packed tile position (not a live Building
- * reference), re-resolved on every delivery, so it survives save/load and
- * naturally goes "dead" (silently drops items) if the far side is ever
- * removed or replaced with something else.
+ * Link targets are stored as packed tile positions (not live Building
+ * references), re-resolved on every delivery, so they survive save/load and
+ * naturally go "dead" (silently skipped) if the far side is ever removed or
+ * replaced with something else.
  */
 public class KryptosTeleportLink extends Block {
 
@@ -47,22 +56,44 @@ public class KryptosTeleportLink extends Block {
         buildVisibility = BuildVisibility.shown;
 
         config(Building.class, (KryptosTeleportLinkBuild tile, Building other) -> {
-            tile.linkPos = other != null ? other.pos() : -1;
+            tile.toggleLink(other != null ? other.pos() : -1);
         });
 
         // Also allow linking directly via a raw packed position (Integer),
         // in case a future UI/manual-link feature wants to set it that way
         // without needing a live Building reference.
-        config(Integer.class, (KryptosTeleportLinkBuild tile, Integer pos) -> tile.linkPos = pos);
+        config(Integer.class, (KryptosTeleportLinkBuild tile, Integer pos) -> tile.toggleLink(pos));
     }
 
     public class KryptosTeleportLinkBuild extends Building {
 
-        public int linkPos = -1;
+        // Packed tile positions of every linked target. Usually just one,
+        // but can hold several for fan-out (round-robin delivery).
+        public IntSeq links = new IntSeq();
+
+        // Cursor into `links` for round-robin delivery -- advances only on
+        // a successful handleItem, never just from checking acceptItem.
+        private int rrIndex = 0;
 
         // Same reasoning as KryptosItemTeleporter: show whatever item last
         // passed through instead of a fixed icon.
         public Item lastItem;
+
+        // Adds `pos` to this block's link list, or removes it if it's
+        // already linked (toggle) -- this is what tap-to-link and the
+        // logic `configure` call both drive. Passing -1 clears every link.
+        public void toggleLink(int pos) {
+            if (pos == -1) {
+                links.clear();
+                return;
+            }
+            int at = links.indexOf(pos);
+            if (at >= 0) {
+                links.removeIndex(at);
+            } else {
+                links.add(pos);
+            }
+        }
 
         // Without this, items delivered here (via handleItem storing them
         // in `items` when this link is the terminal of a chain) just sit
@@ -88,7 +119,7 @@ public class KryptosTeleportLink extends Block {
         @Override
         public boolean onConfigureBuildTapped(Building other) {
             if (this == other) {
-                // Double-tapping self clears the link.
+                // Double-tapping self clears every link.
                 configure(-1);
                 return false;
             }
@@ -99,11 +130,9 @@ public class KryptosTeleportLink extends Block {
                 return true;
             }
 
-            if (linkPos == other.pos()) {
-                // Tapping the currently-linked target again unlinks it.
-                configure(-1);
-                return false;
-            } else if (other.block instanceof KryptosTeleportLink && other.team == team) {
+            if (other.block instanceof KryptosTeleportLink && other.team == team) {
+                // Toggles: adds it if not already linked, removes it if it
+                // is -- lets you tap several targets in a row to fan out.
                 configure(other.pos());
                 return false;
             }
@@ -112,55 +141,55 @@ public class KryptosTeleportLink extends Block {
         }
 
         // Shown while this block is selected (config open) -- draws a
-        // pulsing outline on this block, and if it's already linked, a
-        // highlighted outline + arrow pointing at the current target so
-        // the player can see the link regardless of distance (there's no
-        // range limit here, unlike PayloadMassDriver's dashCircle, so we
-        // don't try to show "all valid tiles" -- any other same-team
-        // KryptosTeleportLink on the map is a valid tap target).
+        // pulsing outline on this block, and one highlighted outline +
+        // arrow per linked target, so the player can see every link
+        // regardless of distance (there's no range limit here, unlike
+        // PayloadMassDriver's dashCircle, so we don't try to show "all
+        // valid tiles" -- any other same-team KryptosTeleportLink on the
+        // map is a valid tap target).
         @Override
         public void drawConfigure() {
             float sin = Mathf.absin(Time.time, 6f, 1f);
 
             Drawf.select(x, y, size * tilesize / 2f + 2f + sin, Pal.accent);
 
-            Building target = linkedBuilding();
-            if (target != null && target != this) {
-                Drawf.select(target.x, target.y, target.block.size * tilesize / 2f + 2f + sin, Pal.place);
-                Drawf.arrow(x, y, target.x, target.y, size * tilesize + sin, 4f + sin, Pal.place);
+            for (int i = 0; i < links.size; i++) {
+                Building target = buildAt(links.get(i));
+                if (target != null && target != this) {
+                    Drawf.select(target.x, target.y, target.block.size * tilesize / 2f + 2f + sin, Pal.place);
+                    Drawf.arrow(x, y, target.x, target.y, size * tilesize + sin, 4f + sin, Pal.place);
+                }
             }
         }
 
-        // Max number of teleport-link hops to follow before giving up.
-        // Without this cap, a link cycle (A -> B -> A, or any longer loop)
-        // would make acceptItem/handleItem call each other forever and
-        // crash with a StackOverflowError -- this happened for real (see
-        // crash log: infinite kryptos.content.KryptosTeleportLink$
-        // KryptosTeleportLinkBuild.acceptItem recursion). Any ordinary
-        // chain of linked teleporters is nowhere near this deep, so hitting
-        // the cap always means a cycle or a broken/dangling link -- in
-        // both cases we just drop the item like any other dead link.
+        // Max combined number of teleport-link hops to follow (across the
+        // WHOLE search, including every branch tried) before giving up.
+        // Without this cap, a link cycle (A -> B -> A, or any longer loop,
+        // possibly through a fan-out with several branches) could make
+        // resolution recurse forever and crash with a StackOverflowError --
+        // this happened for real (see crash log: infinite
+        // kryptos.content.KryptosTeleportLink$KryptosTeleportLinkBuild
+        // .acceptItem recursion). Any ordinary web of linked teleporters is
+        // nowhere near this deep, so hitting the cap always means a cycle
+        // or a broken/dangling link -- in both cases the item is just
+        // dropped like any other dead link.
         private static final int MAX_LINK_HOPS = 64;
 
         @Override
         public boolean acceptItem(Building source, Item item) {
-            Building target = resolveFinalTarget();
-            if (target == null) return false;
-            if (target instanceof KryptosTeleportLinkBuild terminal) {
-                // Terminal teleport link with nowhere further to forward --
-                // it holds the item itself (like a tiny buffer) so nearby
-                // extractors/inserters can pull it out, instead of
-                // requiring every link to chain onward to some other block.
-                return terminal.items.total() < itemCapacity;
-            }
-            return target.acceptItem(this, item);
+            return pickTarget(item) != null;
         }
 
         @Override
         public void handleItem(Building source, Item item) {
-            Building target = resolveFinalTarget();
+            Building target = pickTarget(item);
             if (target != null) {
                 if (target instanceof KryptosTeleportLinkBuild terminal) {
+                    // Terminal teleport link with nowhere further to
+                    // forward -- it holds the item itself (like a tiny
+                    // buffer) so nearby extractors/inserters can pull it
+                    // out, instead of requiring every link to chain onward
+                    // to some other block.
                     terminal.items.add(item, 1);
                 } else {
                     target.handleItem(this, item);
@@ -168,10 +197,18 @@ public class KryptosTeleportLink extends Block {
                 lastItem = item;
                 KryptosFx.scanTeleportOut.at(x, y, 0f, item.color);
                 KryptosFx.scanTeleport.at(target.x, target.y, 0f, item.color);
+
+                // Only advance the round-robin cursor on an actual
+                // successful delivery, not on speculative acceptItem
+                // checks -- otherwise a conveyor calling acceptItem
+                // repeatedly without ever following through would
+                // desync which target is "next".
+                if (links.size > 0) rrIndex = (rrIndex + 1) % links.size;
             }
-            // No valid link (or a cycle): item just vanishes (teleport
-            // failed silently), matching how KryptosItemTeleporter drops
-            // items when the core is unreachable.
+            // No valid link (or every link dead-ends/cycles): item just
+            // vanishes (teleport failed silently), matching how
+            // KryptosItemTeleporter drops items when the core is
+            // unreachable.
         }
 
         @Override
@@ -191,57 +228,97 @@ public class KryptosTeleportLink extends Block {
             }
         }
 
-        private Building linkedBuilding() {
-            if (linkPos == -1) return null;
-            var t = world.tile(Point2.x(linkPos), Point2.y(linkPos));
+        private Building buildAt(int pos) {
+            if (pos == -1) return null;
+            var t = world.tile(Point2.x(pos), Point2.y(pos));
             return t != null ? t.build : null;
         }
 
-        // Follows the link chain iteratively (NOT recursively) until it
-        // reaches either a building that isn't itself a KryptosTeleportLink,
-        // or a KryptosTeleportLink that has no further outgoing link of its
-        // own -- both count as a valid terminal delivery point. Returns
-        // null only for a direct cycle back to the origin, or if the chain
-        // is still going after MAX_LINK_HOPS (a longer cycle).
-        private Building resolveFinalTarget() {
-            Building current = this;
-            for (int hops = 0; hops < MAX_LINK_HOPS; hops++) {
-                if (!(current instanceof KryptosTeleportLinkBuild link)) {
-                    return current; // reached a normal, non-teleport-link building
+        // Round-robins across this block's OWN links (if more than one),
+        // starting from rrIndex, and returns the first resolved target that
+        // can actually accept `item` right now -- or null if none can (or
+        // there are no links at all). Does not mutate rrIndex itself; the
+        // caller advances it only after a successful handleItem.
+        private Building pickTarget(Item item) {
+            if (links.isEmpty()) return null;
+
+            int[] hopsLeft = {MAX_LINK_HOPS};
+            for (int i = 0; i < links.size && hopsLeft[0] > 0; i++) {
+                int idx = (rrIndex + i) % links.size;
+                Building resolved = resolveFrom(links.get(idx), hopsLeft);
+                if (resolved == null) continue;
+
+                if (resolved instanceof KryptosTeleportLinkBuild terminal) {
+                    if (terminal.items.total() < itemCapacity) return terminal;
+                } else if (resolved.acceptItem(this, item)) {
+                    return resolved;
                 }
-                Building next = link.linkedBuilding();
-                if (next == null) {
-                    return current; // chain ends here -- this link IS the terminal
-                }
-                if (next == this) return null; // direct cycle back to the origin
-                current = next;
             }
-            return null; // likely a longer cycle -- give up rather than loop forever
+            return null;
         }
 
+        // Follows the link chain starting at `pos`, iteratively (not
+        // recursively along the main chain), until it reaches either a
+        // building that isn't itself a KryptosTeleportLink, or a
+        // KryptosTeleportLink that has no further outgoing links of its own
+        // -- both count as a valid terminal delivery point. If an
+        // intermediate node itself has multiple links (nested fan-out), its
+        // own links are tried in order (first one that resolves wins).
+        // Returns null for a dead/missing link, a cycle back to this
+        // origin block, or if the shared hop budget runs out (a longer
+        // cycle or an implausibly long/wide chain).
+        private Building resolveFrom(int pos, int[] hopsLeft) {
+            if (hopsLeft[0]-- <= 0) return null;
 
+            Building current = buildAt(pos);
+            if (current == null || current == this) return null;
 
-        @Override
-        public Integer config() {
-            return linkPos;
+            if (!(current instanceof KryptosTeleportLinkBuild link)) {
+                return current; // reached a normal, non-teleport-link building
+            }
+            if (link.links.isEmpty()) {
+                return current; // chain ends here -- this link IS the terminal
+            }
+
+            for (int i = 0; i < link.links.size; i++) {
+                Building next = resolveFrom(link.links.get(i), hopsLeft);
+                if (next != null) return next;
+                if (hopsLeft[0] <= 0) break;
+            }
+            return null;
         }
 
         @Override
         public byte version() {
-            return 1;
+            return 2;
         }
 
         @Override
         public void write(Writes write) {
             super.write(write);
-            write.i(linkPos);
+            write.s((short) links.size);
+            for (int i = 0; i < links.size; i++) {
+                write.i(links.get(i));
+            }
             write.s(lastItem == null ? -1 : lastItem.id);
         }
 
         @Override
         public void read(Reads read, byte revision) {
             super.read(read, revision);
-            linkPos = read.i();
+            if (revision >= 2) {
+                int count = read.s();
+                links.clear();
+                for (int i = 0; i < count; i++) {
+                    links.add(read.i());
+                }
+            } else {
+                // Old single-link saves (version 1): one packed position,
+                // or -1 for "unlinked".
+                int oldLinkPos = read.i();
+                links.clear();
+                if (oldLinkPos != -1) links.add(oldLinkPos);
+            }
             short itemId = read.s();
             lastItem = itemId == -1 ? null : content.item(itemId);
         }
