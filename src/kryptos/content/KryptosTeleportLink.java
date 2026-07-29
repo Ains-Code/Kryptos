@@ -13,6 +13,7 @@ import mindustry.gen.Building;
 import mindustry.graphics.Drawf;
 import mindustry.graphics.Pal;
 import mindustry.type.Item;
+import mindustry.type.Liquid;
 import mindustry.world.Block;
 import mindustry.world.meta.BuildVisibility;
 
@@ -51,9 +52,12 @@ public class KryptosTeleportLink extends Block {
         solid = true;
         hasItems = true;
         itemCapacity = 10;
+        hasLiquids = true;
+        liquidCapacity = 10f;
         configurable = true;
         logicConfigurable = true;
         buildVisibility = BuildVisibility.shown;
+        floating = true; // placeable on water/liquid tiles, like a bridge
 
         config(Building.class, (KryptosTeleportLinkBuild tile, Building other) -> {
             tile.toggleLink(other != null ? other.pos() : -1);
@@ -75,9 +79,18 @@ public class KryptosTeleportLink extends Block {
         // a successful handleItem, never just from checking acceptItem.
         private int rrIndex = 0;
 
+        // Separate round-robin cursor for liquids, so item flow and liquid
+        // flow through the same links don't interfere with each other's
+        // "next target" pointer.
+        private int liquidRrIndex = 0;
+
         // Same reasoning as KryptosItemTeleporter: show whatever item last
         // passed through instead of a fixed icon.
         public Item lastItem;
+
+        // Whatever liquid last passed through, for the same reasoning --
+        // shown as a small tinted indicator when there's no item to draw.
+        public Liquid lastLiquid;
 
         // Adds `pos` to this block's link list, or removes it if it's
         // already linked (toggle) -- this is what tap-to-link and the
@@ -95,15 +108,18 @@ public class KryptosTeleportLink extends Block {
             }
         }
 
-        // Without this, items delivered here (via handleItem storing them
-        // in `items` when this link is the terminal of a chain) just sit
-        // in storage forever -- nothing was ever pushing them onto an
-        // adjacent conveyor/inserter. dumpAccumulate() is the same
-        // mechanism vanilla blocks like ItemBridge use to push stored
-        // items outward each tick.
+        // Without this, items/liquids delivered here (via handleItem/
+        // handleLiquid storing them when this link is the terminal of a
+        // chain) just sit in storage forever -- nothing was ever pushing
+        // them onto an adjacent conveyor/inserter/pipe. dumpAccumulate()/
+        // dumpLiquid() are the same mechanisms vanilla blocks like
+        // ItemBridge use to push stored contents outward each tick.
         @Override
         public void updateTile() {
             dumpAccumulate();
+            if (liquids.currentAmount() > 0.001f) {
+                dumpLiquid(liquids.current());
+            }
         }
 
         // Enables in-game tap-to-link (select this block, then tap another
@@ -212,6 +228,55 @@ public class KryptosTeleportLink extends Block {
         }
 
         @Override
+        public boolean acceptLiquid(Building source, Liquid liquid) {
+            return pickLiquidTarget(liquid) != null;
+        }
+
+        @Override
+        public void handleLiquid(Building source, Liquid liquid, float amount) {
+            Building target = pickLiquidTarget(liquid);
+            if (target != null) {
+                if (target instanceof KryptosTeleportLinkBuild terminal) {
+                    // Terminal teleport link with nowhere further to
+                    // forward -- it holds the liquid itself so nearby
+                    // pipes/pumps/tanks can draw it out.
+                    terminal.liquids.add(liquid, amount);
+                } else {
+                    target.handleLiquid(this, liquid, amount);
+                }
+                lastLiquid = liquid;
+                KryptosFx.scanTeleportOut.at(x, y, 0f, liquid.color);
+                KryptosFx.scanTeleport.at(target.x, target.y, 0f, liquid.color);
+
+                if (links.size > 0) liquidRrIndex = (liquidRrIndex + 1) % links.size;
+            }
+            // No valid link (or every link dead-ends/cycles): liquid just
+            // vanishes, same as a dropped item above.
+        }
+
+        // Round-robins across this block's OWN links for liquid, exactly
+        // like pickTarget() does for items -- kept as a separate cursor
+        // (liquidRrIndex) so item and liquid flow don't fight over which
+        // target is "next".
+        private Building pickLiquidTarget(Liquid liquid) {
+            if (links.isEmpty()) return null;
+
+            int[] hopsLeft = {MAX_LINK_HOPS};
+            for (int i = 0; i < links.size && hopsLeft[0] > 0; i++) {
+                int idx = (liquidRrIndex + i) % links.size;
+                Building resolved = resolveFrom(links.get(idx), hopsLeft);
+                if (resolved == null) continue;
+
+                if (resolved instanceof KryptosTeleportLinkBuild terminal) {
+                    if (terminal.liquids.get(liquid) < liquidCapacity) return terminal;
+                } else if (resolved.acceptLiquid(this, liquid)) {
+                    return resolved;
+                }
+            }
+            return null;
+        }
+
+        @Override
         public void draw() {
             super.draw();
             if (lastItem != null) {
@@ -225,6 +290,18 @@ public class KryptosTeleportLink extends Block {
                 Draw.reset();
 
                 Draw.rect(lastItem.fullIcon, x, y, 5f, 5f);
+            } else if (lastLiquid != null && liquids.currentAmount() > 0.001f) {
+                // No item to show -- if there's liquid actually sitting in
+                // storage right now, tint the same recessed socket with
+                // the liquid's color instead of an item icon.
+                Draw.color(Pal.darkestMetal);
+                Fill.square(x, y, 3f);
+                Draw.color(lastLiquid.color);
+                Fill.square(x, y, 2.5f);
+                Draw.color(Pal.darkOutline);
+                Lines.stroke(1f);
+                Lines.square(x, y, 3f);
+                Draw.reset();
             }
         }
 
@@ -290,7 +367,7 @@ public class KryptosTeleportLink extends Block {
 
         @Override
         public byte version() {
-            return 2;
+            return 3;
         }
 
         @Override
@@ -301,6 +378,7 @@ public class KryptosTeleportLink extends Block {
                 write.i(links.get(i));
             }
             write.s(lastItem == null ? -1 : lastItem.id);
+            write.s(lastLiquid == null ? -1 : lastLiquid.id);
         }
 
         @Override
@@ -321,6 +399,11 @@ public class KryptosTeleportLink extends Block {
             }
             short itemId = read.s();
             lastItem = itemId == -1 ? null : content.item(itemId);
+
+            if (revision >= 3) {
+                short liquidId = read.s();
+                lastLiquid = liquidId == -1 ? null : content.liquid(liquidId);
+            }
         }
     }
 }
